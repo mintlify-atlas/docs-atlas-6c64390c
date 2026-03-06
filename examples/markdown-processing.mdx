@@ -1,0 +1,323 @@
+---
+title: 'Markdown Processing'
+description: 'Process structured markdown documents with table of contents generation, section extraction, and JSON querying'
+icon: 'markdown'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/markdown_processing/markdown_processing.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Process structured markdown documents using Fenic's specialized markdown functions, JSON processing, and text extraction capabilities. This example uses the "Attention Is All You Need" paper - the foundational work that introduced the Transformer architecture.
+
+## What This Example Shows
+
+Learn how to process structured markdown documents using Fenic's comprehensive capabilities:
+
+<CardGroup cols={2}>
+  <Card title="markdown.generate_toc()" icon="list">
+    Generate automatic table of contents from document headings.
+  </Card>
+  <Card title="markdown.extract_header_chunks()" icon="scissors">
+    Extract and structure document sections into DataFrame rows.
+  </Card>
+  <Card title="markdown.to_json()" icon="code">
+    Convert markdown to structured JSON for complex querying.
+  </Card>
+  <Card title="json.jq()" icon="magnifying-glass">
+    Navigate complex document structures with powerful jq queries.
+  </Card>
+  <Card title="text.extract()" icon="highlighter">
+    Parse structured text using templates for field extraction.
+  </Card>
+  <Card title="DataFrame Operations" icon="table">
+    Filter, explode, unnest, and transform document data.
+  </Card>
+</CardGroup>
+
+## Running the Example
+
+```bash
+cd examples/markdown_processing
+python markdown_processing.py
+```
+
+<Note>
+This example doesn't require an API key as it uses native markdown and text processing functions without LLMs.
+</Note>
+
+## What You'll Learn
+
+### 1. Document Structure Analysis
+
+```python
+import fenic as fc
+from pathlib import Path
+
+config = fc.SessionConfig(app_name="markdown_processing")
+session = fc.Session.get_or_create(config)
+
+# Load markdown document
+paper_path = Path(__file__).parent / "attention_is_all_you_need.md"
+with open(paper_path, 'r', encoding='utf-8') as f:
+    paper_content = f.read()
+
+df = session.create_dataframe({
+    "paper_title": ["Attention Is All You Need"],
+    "content": [paper_content]
+})
+
+# Cast content to MarkdownType
+df = df.select(
+    fc.col("paper_title"),
+    fc.col("content").cast(fc.MarkdownType).alias("markdown")
+)
+```
+
+### 2. Generate Table of Contents
+
+```python
+# Generate automatic TOC from document headings
+toc_df = df.select(
+    fc.col("paper_title"),
+    fc.markdown.generate_toc(fc.col("markdown")).alias("toc")
+)
+
+print("Table of Contents:")
+toc_df.show()
+```
+
+<Info>
+`markdown.generate_toc()` automatically creates a hierarchical table of contents from all heading levels in the document.
+</Info>
+
+### 3. Section Extraction and Structuring
+
+```python
+# Extract sections up to level 2 headers
+sections_df = df.select(
+    fc.col("paper_title"),
+    fc.markdown.generate_toc(fc.col("markdown")).alias("toc"),
+    fc.markdown.extract_header_chunks(
+        fc.col("markdown"),
+        header_level=2
+    ).alias("sections")
+).explode("sections").unnest("sections")
+
+print("Sections DataFrame (each row is a document section):")
+sections_df.show()
+```
+
+Each section contains:
+- `heading`: The section heading text
+- `content`: The content under that heading
+- `hierarchy`: The path to the section (e.g., "1.2.3")
+
+### 4. Traditional Text Processing
+
+```python
+# Filter for specific section (References)
+references_df = sections_df.filter(
+    fc.col("heading").contains("References")
+)
+
+# Split references on citation numbers [1], [2], etc.
+print("Individual references extracted by splitting:")
+references_df.select(
+    fc.text.split(fc.col("content"), r"\[\d+\]").alias("references")
+).explode("references").show()
+```
+
+### 5. JSON-Based Document Processing
+
+```python
+# Convert document to JSON structure
+document_json_df = df.select(
+    fc.col("paper_title"),
+    fc.markdown.to_json(fc.col("markdown")).alias("document_json")
+)
+
+# Extract individual references using jq
+individual_refs_df = document_json_df.select(
+    fc.col("paper_title"),
+    fc.json.jq(
+        fc.col("document_json"),
+        # Navigate to References section and split text into individual citations
+        '.children[-1].children[] | select(.type == "heading" and (.content[0].text == "References")) | .children[0].content[0].text | split("\\n") | .[]'
+    ).alias("reference_text")
+).explode("reference_text").select(
+    fc.col("paper_title"),
+    fc.col("reference_text").cast(fc.StringType).alias("reference_text")
+).filter(
+    fc.col("reference_text") != ""
+)
+
+print("Individual references extracted using JSON + jq:")
+individual_refs_df.show()
+```
+
+<Info>
+JSON processing with jq enables powerful navigation of complex nested document structures.
+</Info>
+
+### 6. Template-Based Text Extraction
+
+```python
+# Extract reference numbers and content using text.extract()
+parsed_refs_df = individual_refs_df.select(
+    fc.col("paper_title"),
+    fc.text.extract(
+        fc.col("reference_text"),
+        "[${ref_number:none}] ${content:none}"
+    ).alias("parsed_ref")
+).select(
+    fc.col("paper_title"),
+    fc.col("parsed_ref").get_item("ref_number").alias("reference_number"),
+    fc.col("parsed_ref").get_item("content").alias("citation_content")
+)
+
+print("References with separated numbers and content:")
+parsed_refs_df.show()
+```
+
+## Complete Workflow Example
+
+```python
+# Combine multiple operations
+workflow_df = df.select(
+    fc.col("paper_title"),
+    fc.col("content").cast(fc.MarkdownType).alias("markdown")
+).select(
+    fc.col("paper_title"),
+    # Generate TOC
+    fc.markdown.generate_toc(fc.col("markdown")).alias("toc"),
+    # Extract sections
+    fc.markdown.extract_header_chunks(
+        fc.col("markdown"),
+        header_level=2
+    ).alias("sections"),
+    # Convert to JSON for complex queries
+    fc.markdown.to_json(fc.col("markdown")).alias("json_structure")
+)
+
+print("Complete document analysis:")
+workflow_df.show()
+```
+
+## Use Cases
+
+Perfect for building:
+
+<CardGroup cols={2}>
+  <Card title="Academic Paper Analysis" icon="graduation-cap">
+    Extract citations, sections, and metadata from research papers.
+  </Card>
+  <Card title="Documentation Processing" icon="book">
+    Parse technical documentation for search and indexing.
+  </Card>
+  <Card title="Citation Extraction" icon="quote-right">
+    Build citation databases from academic literature.
+  </Card>
+  <Card title="Content Structuring" icon="sitemap">
+    Prepare structured content for downstream analysis or ML pipelines.
+  </Card>
+</CardGroup>
+
+## Key Functions Reference
+
+### markdown.generate_toc()
+
+```python
+fc.markdown.generate_toc(fc.col("markdown"))
+```
+
+Generates a hierarchical table of contents from all heading levels.
+
+### markdown.extract_header_chunks()
+
+```python
+fc.markdown.extract_header_chunks(
+    fc.col("markdown"),
+    header_level=2  # Extract up to level 2 headings
+)
+```
+
+Extracts sections as an array of structs with `heading`, `content`, and `hierarchy` fields.
+
+### markdown.to_json()
+
+```python
+fc.markdown.to_json(fc.col("markdown"))
+```
+
+Converts markdown to a nested JSON structure for complex querying.
+
+### json.jq()
+
+```python
+fc.json.jq(
+    fc.col("json_data"),
+    '.children[0].content[0].text'  # JQ query
+)
+```
+
+Executes JQ queries on JSON data for powerful navigation and transformation.
+
+### text.extract()
+
+```python
+fc.text.extract(
+    fc.col("text"),
+    "[${ref_number:none}] ${content:none}"  # Template pattern
+)
+```
+
+Extracts structured data using template patterns with `${field:type}` syntax.
+
+## Advanced Features Demonstrated
+
+### Chaining Operations
+
+```python
+# Chain multiple transformations
+result = (
+    df.select(fc.col("content").cast(fc.MarkdownType).alias("md"))
+    .select(fc.markdown.extract_header_chunks(fc.col("md"), header_level=2).alias("sections"))
+    .explode("sections")
+    .unnest("sections")
+    .filter(fc.col("heading").contains("Introduction"))
+    .select(fc.col("content"))
+)
+```
+
+### Type Conversions
+
+```python
+# Cast between types as needed
+df.select(
+    fc.col("markdown").cast(fc.MarkdownType),  # String -> MarkdownType
+    fc.markdown.to_json(fc.col("markdown")),    # MarkdownType -> JsonType
+    fc.col("json").cast(fc.StringType)          # JsonType -> StringType
+)
+```
+
+## Expected Output
+
+The pipeline demonstrates:
+
+- ✓ Loading markdown documents into Fenic DataFrames
+- ✓ Generating table of contents with `markdown.generate_toc()`
+- ✓ Extracting structured sections with `markdown.extract_header_chunks()`
+- ✓ Converting arrays to rows with `explode()` and `unnest()`
+- ✓ Filtering DataFrames to find specific sections
+- ✓ Text processing with `split()` and regex patterns
+- ✓ Converting markdown to JSON with `markdown.to_json()`
+- ✓ Querying JSON structures with `json.jq()`
+- ✓ Template-based text extraction with `text.extract()`
+- ✓ Structured citation parsing into separate fields
+
+<Tip>
+Combine markdown processing with semantic operations to build powerful document analysis pipelines that understand both structure and content.
+</Tip>

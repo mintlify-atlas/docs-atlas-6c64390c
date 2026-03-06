@@ -1,0 +1,159 @@
+---
+title: Introduction
+description: Learn about Fenic, the declarative context engineering framework for AI agents
+---
+
+# Introduction to Fenic
+
+**Fenic is a declarative context engineering framework that works with any agent runtime.** Apply context operations (extract, chunk, retrieve, store, compact, summarize) to produce typed, tool-bounded outputs your agents can use—with inference offloading and no framework lock-in.
+
+## What is Context Engineering?
+
+Context engineering is the practice of managing everything that goes into an LLM's context window: retrieval results, memory, conversation history, tool responses, and prompts. It's both an **information problem** (what information, in what structure) and an **optimization problem** (how much, when to compress, what to forget).
+
+Fenic's declarative approach fits naturally here. Instead of writing imperative code for each context operation, you describe _what_ your context should look like—and iterate quickly as you learn what works.
+
+## The Fenic Approach
+
+| Without Fenic                                             | With Fenic                                               |
+| --------------------------------------------------------- | -------------------------------------------------------- |
+| Agent summarizes conversation → tokens consumed           | Fenic summarizes → agent gets result; less context bloat |
+| Agent extracts facts → tokens consumed                    | Fenic extracts → agent gets structured data              |
+| Agent searches, filters, aggregates → multiple tool calls | Fenic pre-computes → agent gets precise rows             |
+| Context ops compete with reasoning                        | Less context bloat → agents stay focused on reasoning    |
+
+## Key Benefits
+
+<CardGroup cols={2}>
+  <Card title="Inference Offloading" icon="bolt">
+    Summarization, extraction, and embedding happen outside your agent's context window. Your runtime gets the results with less context bloat.
+  </Card>
+  
+  <Card title="Framework Agnostic" icon="puzzle-piece">
+    Works with any agent framework (LangGraph, PydanticAI, CrewAI, etc.). Expose context as MCP tools or Python functions.
+  </Card>
+  
+  <Card title="Declarative Transforms" icon="wand-magic-sparkles">
+    Combine deterministic operations (filter, join, aggregate) with semantic ones (extract, embed, summarize) in a single composable flow.
+  </Card>
+  
+  <Card title="Typed & Bounded" icon="shield-check">
+    Model context relationally with strong typing. Query it precisely with result caps and token-budget awareness.
+  </Card>
+</CardGroup>
+
+## What You Can Build
+
+### Memory & Personalization
+
+- **Curated memory packs** — Extract/dedupe/redact facts; serve read-only for recall
+- **Blocks & episodes** — Persistent profile + recent event timeline; scoped snapshots
+- **Decaying resolution memory** — Window functions for temporal compression (daily → weekly → monthly)
+- **Cross-agent shared memory** — Typed tables accessible by multiple agents in your framework
+
+### Retrieval & Knowledge
+
+- **Policy / KB Q&A** — Parse PDFs → `extract(Schema)` → `embed` → neighbors with citations
+- **Chunked retrieval** — Chunk/overlap you control, hybrid filter, optional re-rank
+
+### Context Operations (Inference Offloaded)
+
+- **Summarization** — Deterministic or LLM-powered, reducing context bloat so agents stay focused
+- **Invariant management** — Store facts that should persist; re-inject at decision points
+- **Token-budget-aware truncation** — Shape tool responses to fit budgets
+- ...and more - Fenic's API allows you to define any context operation you might need
+
+### Structured Context from Data
+
+- **Entity matching** — Resolve duplicates / link records
+- **Theme extraction** — Cluster + label patterns
+- **Semantic linking** — Connect records across systems by meaning
+- …and more — Fenic's declarative API supports any data transformation your agents need
+
+## Core Concepts
+
+### Lifecycle: Hydrate → Shape → Serve → Operate
+
+<Steps>
+  <Step title="Hydrate">
+    Load sources from PDFs, Markdown, CSV, JSON, or databases
+  </Step>
+  
+  <Step title="Shape">
+    Transform with deterministic ops (select/filter/join/window) + semantic ops (extract/embed/summarize)
+  </Step>
+  
+  <Step title="Serve">
+    Expose as bounded tools (MCP or Python functions) with result caps
+  </Step>
+  
+  <Step title="Operate">
+    Version with snapshots/tags; rollback instantly
+  </Step>
+</Steps>
+
+### Design Principles
+
+| Principle                   | What It Means                                                                |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| **Framework-agnostic**      | Works with any runtime that can call tools or functions                      |
+| **Inference offloading**    | Context operations happen in Fenic, not your agent's context window          |
+| **Context as typed tables** | Model context relationally; query it precisely                               |
+| **Declarative transforms**  | Focus on _what_ context to build, not _how_—iterate fast on context strategy |
+| **Bounded tool surfaces**   | Minimal, auditable interfaces with result caps                               |
+| **Immutable snapshots**     | Version context for reproducibility                                          |
+| **Runtime enablement**      | Provide primitives; let your framework orchestrate                           |
+
+## Architecture
+
+Fenic uses a **session-centric design** where all operations flow through `Session.get_or_create()`. Operations build **logical plans** that execute lazily when you call actions like `.show()`, `.collect()`, or `.write.save_as_table()`.
+
+```python
+import fenic as fc
+
+# 1. Create session with semantic capabilities
+session = fc.Session.get_or_create(
+    fc.SessionConfig(
+        app_name="my_app",
+        semantic=fc.SemanticConfig(
+            language_models={
+                "gpt": fc.OpenAILanguageModel(
+                    model_name="gpt-4o-mini",
+                    rpm=500,
+                    tpm=200_000
+                )
+            }
+        )
+    )
+)
+
+# 2. Load and shape data
+df = session.create_dataframe([{"text": "..."}])
+
+# 3. Apply transformations
+result = df.select(
+    fc.semantic.extract(
+        fc.col("text"),
+        MyPydanticSchema
+    ).alias("structured_data")
+)
+
+# 4. Execute and display
+result.show()
+```
+
+<Note>
+  LLM calls still cost tokens/$, but Fenic keeps that work out of your agent's prompt/context window, reducing context bloat.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get Fenic installed and configured
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first context pipeline in 5 minutes
+  </Card>
+</CardGroup>

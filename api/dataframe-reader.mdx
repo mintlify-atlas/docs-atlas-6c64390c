@@ -1,0 +1,259 @@
+---
+title: DataFrameReader
+description: Read data from various file formats and external sources into DataFrames
+---
+
+The `DataFrameReader` interface provides methods to load DataFrames from external storage systems, including local files, S3, and Hugging Face datasets.
+
+## Access
+
+Access the reader through a session's `read` property:
+
+```python
+session = fc.Session.get_or_create()
+df = session.read.csv("data.csv")
+```
+
+## Supported Storage Schemes
+
+### Amazon S3
+
+Format: `s3://{bucket_name}/{path_to_file}`
+
+- Uses boto3 to acquire AWS credentials
+- Supports glob patterns
+
+```python
+df = session.read.csv("s3://my-bucket/data.csv")
+df = session.read.parquet("s3://my-bucket/data/*.parquet")
+```
+
+### Hugging Face Datasets
+
+Format: `hf://{repo_type}/{repo_id}/{path_to_file}`
+
+- Supports glob patterns (`*`, `**`)
+- Supports dataset revisions and branch aliases (e.g., `@refs/convert/parquet`, `@~parquet`)
+- Requires `HF_TOKEN` environment variable for private datasets
+
+```python
+df = session.read.csv("hf://datasets/datasets-examples/doc-formats-csv-1/data.csv")
+df = session.read.parquet("hf://datasets/cais/mmlu/astronomy/*.parquet")
+```
+
+### Local Files
+
+Format: `file://{absolute_or_relative_path}` or implicit
+
+- Paths without a scheme are treated as local files
+- Supports relative and absolute paths
+
+```python
+df = session.read.csv("./data.csv")
+df = session.read.parquet("file:///home/user/data.parquet")
+```
+
+## Methods
+
+### csv()
+
+Load a DataFrame from one or more CSV files.
+
+<ParamField path="paths" type="str | Path | list[str | Path]" required>
+  A single file path, a glob pattern (e.g., `"data/*.csv"`), or a list of paths.
+</ParamField>
+
+<ParamField path="schema" type="Schema" default="None">
+  Complete schema definition with column names and types. Only primitive types are supported. If provided, all files must match this schema exactly.
+</ParamField>
+
+<ParamField path="merge_schemas" type="bool" default="False">
+  Whether to merge schemas across all files. If `True`, column names are unified and missing columns are filled with nulls. If `False`, all files must match the schema of the first file.
+</ParamField>
+
+#### Notes
+
+- The first row in each file is assumed to be a header row
+- Delimiters (comma, tab, etc.) are automatically inferred
+- Cannot specify both `schema` and `merge_schemas=True`
+- Date/datetime columns are cast to strings during ingestion
+- The "first file" is defined as:
+  - First file in lexicographic order (for glob patterns)
+  - First file in the provided list (for lists of paths)
+
+#### Examples
+
+<CodeGroup>
+```python Single file
+df = session.read.csv("file.csv")
+```
+
+```python Multiple files with schema merging
+df = session.read.csv("data/*.csv", merge_schemas=True)
+```
+
+```python Explicit schema
+from fenic import Schema, ColumnField, IntegerType, FloatType
+
+df = session.read.csv(
+    ["a.csv", "b.csv"],
+    schema=Schema([
+        ColumnField(name="id", data_type=IntegerType),
+        ColumnField(name="value", data_type=FloatType)
+    ])
+)
+```
+</CodeGroup>
+
+---
+
+### parquet()
+
+Load a DataFrame from one or more Parquet files.
+
+<ParamField path="paths" type="str | Path | list[str | Path]" required>
+  A single file path, a glob pattern (e.g., `"data/*.parquet"`), or a list of paths.
+</ParamField>
+
+<ParamField path="merge_schemas" type="bool" default="False">
+  If `True`, infers and merges schemas across all files. Missing columns are filled with nulls, and differing types are widened to a common supertype.
+</ParamField>
+
+#### Notes
+
+- If `merge_schemas=False` (default), all files must match the schema of the first file
+- Date and datetime columns are cast to strings during ingestion
+- The "first file" is defined as:
+  - First file in lexicographic order (for glob patterns)
+  - First file in the provided list (for lists of paths)
+
+#### Examples
+
+<CodeGroup>
+```python Single file
+df = session.read.parquet("file.parquet")
+```
+
+```python Glob pattern
+df = session.read.parquet("data/*.parquet")
+```
+
+```python Schema merging
+df = session.read.parquet(["a.parquet", "b.parquet"], merge_schemas=True)
+```
+</CodeGroup>
+
+---
+
+### docs()
+
+Load a DataFrame with document contents from markdown or JSON files.
+
+<ParamField path="paths" type="str | Path | list[str | Path]" required>
+  Glob pattern (or list of glob patterns) to the folder(s) to load.
+</ParamField>
+
+<ParamField path="content_type" type="'markdown' | 'json'" required>
+  Content type of the files.
+</ParamField>
+
+<ParamField path="exclude" type="str" default="None">
+  A regex pattern to exclude files. If not provided, no files will be excluded.
+</ParamField>
+
+<ParamField path="recursive" type="bool" default="False">
+  Whether to recursively load files from folders.
+</ParamField>
+
+#### Notes
+
+- Each row in the DataFrame corresponds to one file
+- The DataFrame has these columns:
+  - `file_path`: The path to the file
+  - `error`: Error message if the file failed to load
+  - `content`: The file content cast to the `content_type`
+- Recursive loading works with the `**` glob pattern when `recursive=True`
+- Without `recursive=True`, `**` behaves like a single `*` pattern
+
+#### Examples
+
+<CodeGroup>
+```python Load markdown files recursively
+df = session.read.docs(
+    "data/docs/**/*.md", 
+    content_type="markdown", 
+    recursive=True
+)
+```
+
+```python Exclude files with regex
+df = session.read.docs(
+    "data/docs/*.md", 
+    content_type="markdown", 
+    exclude=r"\.bak.md$"
+)
+```
+
+```python Load JSON files
+df = session.read.docs(
+    "data/*.json",
+    content_type="json"
+)
+```
+</CodeGroup>
+
+---
+
+### pdf_metadata()
+
+Load a DataFrame with metadata from PDF files.
+
+<ParamField path="paths" type="str | Path | list[str | Path]" required>
+  Glob pattern (or list of glob patterns) to the folder(s) to load.
+</ParamField>
+
+<ParamField path="exclude" type="str" default="None">
+  A regex pattern to exclude files.
+</ParamField>
+
+<ParamField path="recursive" type="bool" default="False">
+  Whether to recursively load files from folders.
+</ParamField>
+
+#### Metadata Columns
+
+The resulting DataFrame contains these columns:
+
+- `file_path`: Path to the document
+- `error`: Error message if the file failed to load
+- `size`: Size of the PDF file in bytes
+- `title`: Title of the PDF document
+- `author`: Author of the PDF document
+- `creation_date`: Creation date of the PDF
+- `mod_date`: Modification date of the PDF
+- `page_count`: Number of pages in the PDF
+- `has_forms`: Whether the PDF contains form fields
+- `has_signature_fields`: Whether the PDF contains signature fields
+- `image_count`: Number of images in the PDF
+- `is_encrypted`: Whether the PDF is encrypted
+
+#### Examples
+
+<CodeGroup>
+```python Load metadata recursively
+df = session.read.pdf_metadata("data/docs/**/*.pdf", recursive=True)
+```
+
+```python Exclude files
+df = session.read.pdf_metadata(
+    "data/docs/*.pdf", 
+    exclude=r"\.backup.pdf$"
+)
+```
+</CodeGroup>
+
+## See Also
+
+- [DataFrameWriter](/api/dataframe-writer) - Write DataFrames to files
+- [Catalog](/api/catalog) - Manage tables and views
+- [Data Types](/api/types/data-types) - Available data types for schemas

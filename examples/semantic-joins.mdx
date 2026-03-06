@@ -1,0 +1,328 @@
+---
+title: 'Semantic Joins'
+description: 'Perform LLM-powered data matching based on natural language reasoning rather than exact equality'
+icon: 'link'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/semantic_joins/semantic_joins.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Use Fenic's semantic joins to perform LLM-powered data matching based on natural language reasoning rather than exact equality or similarity scores.
+
+## Overview
+
+Semantic joins enable you to join DataFrames using natural language predicates that are evaluated by language models. Unlike traditional joins that require exact matches or embedding-based similarity joins, semantic joins can understand complex relationships and make intelligent connections based on meaning and context.
+
+## Use Cases
+
+This example showcases two practical applications:
+
+<CardGroup cols={2}>
+  <Card title="Content Recommendation" icon="newspaper">
+    Matching user interests to relevant articles based on semantic understanding.
+  </Card>
+  <Card title="Product Recommendations" icon="cart-shopping">
+    Suggesting complementary products based on purchase history and relationships.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+- **Natural Language Predicates**: Using human-readable join conditions
+- **LLM-Powered Reasoning**: Leveraging GPT models for intelligent matching
+- **Cross-Domain Understanding**: Connecting concepts across different contexts
+- **Zero-Shot Matching**: No training data or examples required
+
+## How Semantic Joins Work
+
+### Basic Syntax
+
+```python
+left_df.semantic.join(
+    right_df,
+    predicate="Natural language predicate with {{left_on}} and {{right_on}}",
+    left_on=col("left"),
+    right_on=col("right")
+)
+```
+
+### Join Jinja Predicate Format
+
+<Info>
+- Jinja template variables must be `left_on` (join key on the left dataframe) and `right_on` (join key on the right dataframe)
+- Written as a boolean predicate that the LLM evaluates as True/False
+- Should be clear and unambiguous for consistent results
+</Info>
+
+## Example 1: Content Recommendation
+
+### Data Setup
+
+```python
+import fenic as fc
+
+config = fc.SessionConfig(
+    app_name="semantic_joins",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "mini": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000,
+            )
+        }
+    ),
+)
+
+session = fc.Session.get_or_create(config)
+
+# User profiles
+users_data = [
+    {
+        "user_id": "user_001",
+        "name": "Sarah",
+        "interests": "I love cooking Italian food and trying new pasta recipes"
+    },
+    {
+        "user_id": "user_002",
+        "name": "Mike",
+        "interests": "I enjoy working on cars and fixing engines in my spare time"
+    },
+    {
+        "user_id": "user_003",
+        "name": "Emily",
+        "interests": "Gardening is my passion, especially growing vegetables and flowers"
+    },
+    {
+        "user_id": "user_004",
+        "name": "David",
+        "interests": "I'm interested in learning about car maintenance and automotive repair"
+    }
+]
+
+# Available articles
+articles_data = [
+    {
+        "article_id": "art_001",
+        "title": "Cooking Pasta Recipes",
+        "description": "Delicious pasta recipes including spaghetti carbonara and fettuccine alfredo"
+    },
+    {
+        "article_id": "art_002",
+        "title": "Car Engine Maintenance",
+        "description": "Essential guide to automobile engine care and troubleshooting"
+    },
+    {
+        "article_id": "art_003",
+        "title": "Gardening for Beginners",
+        "description": "Start your garden with basic techniques for growing vegetables and flowers"
+    },
+    {
+        "article_id": "art_004",
+        "title": "Advanced Automotive Repair",
+        "description": "Comprehensive automotive repair instructions for experienced mechanics"
+    }
+]
+
+users_df = session.create_dataframe(users_data)
+articles_df = session.create_dataframe(articles_data)
+```
+
+### Semantic Join Implementation
+
+```python
+# Use semantic join to match users with articles based on their interests
+user_article_matches = users_df.semantic.join(
+    articles_df,
+    predicate=(
+        "A person with interests '{{left_on}}' would be interested in reading about '{{right_on}}'"
+    ),
+    left_on=fc.col("interests"),
+    right_on=fc.col("description")
+)
+
+print("User-Article Matches:")
+user_article_matches.select(
+    "name",
+    "interests",
+    "title",
+    "description"
+).show()
+```
+
+### Matching Results
+
+| name | interests | title | description |
+|------|-----------|-------|-------------|
+| Sarah | I love cooking Italian food... | Cooking Pasta Recipes | Delicious pasta recipes... |
+| Mike | I enjoy working on cars... | Car Engine Maintenance | Essential guide to automobile... |
+| Mike | I enjoy working on cars... | Advanced Automotive Repair | Comprehensive automotive repair... |
+| Emily | Gardening is my passion... | Gardening for Beginners | Start your garden with basic... |
+| David | I'm interested in car maintenance... | Car Engine Maintenance | Essential guide to automobile... |
+| David | I'm interested in car maintenance... | Advanced Automotive Repair | Comprehensive automotive repair... |
+
+<Note>
+Notice how both Mike and David matched with automotive content, even though their interests are expressed differently. The LLM understands the semantic relationship.
+</Note>
+
+## Example 2: Product Recommendations
+
+### Sample Data
+
+```python
+# Customer purchase history
+purchases_data = [
+    {
+        "customer_id": "cust_001",
+        "customer_name": "Alice",
+        "purchased_product": "Professional DSLR Camera"
+    },
+    {
+        "customer_id": "cust_002",
+        "customer_name": "Bob",
+        "purchased_product": "Gaming Laptop"
+    },
+    {
+        "customer_id": "cust_003",
+        "customer_name": "Carol",
+        "purchased_product": "Yoga Mat"
+    },
+    {
+        "customer_id": "cust_004",
+        "customer_name": "Dan",
+        "purchased_product": "Coffee Maker"
+    }
+]
+
+# Product catalog for recommendations
+products_data = [
+    {"product_id": "prod_001", "product_name": "Camera Lens Kit", "category": "Photography"},
+    {"product_id": "prod_002", "product_name": "Tripod Stand", "category": "Photography"},
+    {"product_id": "prod_003", "product_name": "Gaming Mouse", "category": "Gaming"},
+    {"product_id": "prod_004", "product_name": "Mechanical Keyboard", "category": "Gaming"},
+    {"product_id": "prod_005", "product_name": "Yoga Blocks", "category": "Fitness"},
+    {"product_id": "prod_006", "product_name": "Exercise Resistance Bands", "category": "Fitness"},
+    {"product_id": "prod_007", "product_name": "Coffee Beans Premium Blend", "category": "Food & Beverage"},
+    {"product_id": "prod_008", "product_name": "French Press", "category": "Food & Beverage"}
+]
+
+purchases_df = session.create_dataframe(purchases_data)
+products_df = session.create_dataframe(products_data)
+```
+
+### Recommendation Logic
+
+```python
+# Use semantic join for product recommendations
+recommendations = purchases_df.semantic.join(
+    products_df,
+    predicate=(
+        "A customer who bought '{{left_on}}' would also be interested in '{{right_on}}'"
+    ),
+    left_on=fc.col("purchased_product"),
+    right_on=fc.col("product_name")
+)
+
+print("Product Recommendations:")
+recommendations.select(
+    "customer_name",
+    "purchased_product",
+    "product_name",
+    "category"
+).show()
+```
+
+### Recommendation Results
+
+| customer_name | purchased_product | product_name | category |
+|---------------|-------------------|--------------|----------|
+| Alice | Professional DSLR Camera | Camera Lens Kit | Photography |
+| Alice | Professional DSLR Camera | Tripod Stand | Photography |
+| Bob | Gaming Laptop | Gaming Mouse | Gaming |
+| Bob | Gaming Laptop | Mechanical Keyboard | Gaming |
+| Carol | Yoga Mat | Yoga Blocks | Fitness |
+| Carol | Yoga Mat | Exercise Resistance Bands | Fitness |
+| Dan | Coffee Maker | Coffee Beans Premium Blend | Food & Beverage |
+| Dan | Coffee Maker | French Press | Food & Beverage |
+
+## Performance Characteristics
+
+- **Complexity**: O(m × n) where m and n are the sizes of the DataFrames
+- **LLM Calls**: One API call per potential row pair
+- **Rate Limiting**: Respects RPM/TPM limits configured in session
+- **Batching**: Efficiently batches requests to optimize API usage
+
+## When to Use Semantic Joins
+
+### Ideal Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Content Personalization" icon="user">
+    Recommendation systems that need to understand user preferences.
+  </Card>
+  <Card title="Product Cross-Selling" icon="tags">
+    E-commerce recommendations based on purchase relationships.
+  </Card>
+  <Card title="Skill-Job Matching" icon="briefcase">
+    Recruitment systems matching candidates to job descriptions.
+  </Card>
+  <Card title="Entity Resolution" icon="magnifying-glass">
+    Matching entities across different data sources with varying formats.
+  </Card>
+  <Card title="Question-Answer Pairing" icon="comments">
+    Knowledge bases connecting questions to relevant answers.
+  </Card>
+  <Card title="Customer-Service Matching" icon="handshake">
+    Routing customers to appropriate services based on needs.
+  </Card>
+</CardGroup>
+
+### Advantages
+
+- No training data required (zero-shot)
+- Handles complex reasoning and context
+- Understands domain-specific relationships
+- Works with natural language descriptions
+- Flexible and interpretable join conditions
+
+### Considerations
+
+<Warning>
+- Higher latency than traditional joins
+- API costs for LLM usage
+- Rate limiting for large datasets
+- Best for moderate-sized datasets (hundreds to low thousands of rows)
+</Warning>
+
+## Running the Example
+
+```bash
+# Ensure you have OpenAI API key configured
+export OPENAI_API_KEY="your-api-key"
+
+# Run the semantic joins example
+python semantic_joins.py
+```
+
+## Expected Output
+
+The script demonstrates both use cases with clear before/after data views:
+
+1. **User-Article Matching**: Shows how semantic understanding connects user interests to relevant content
+2. **Product Recommendations**: Demonstrates intelligent product relationship detection for cross-selling
+
+## Learning Outcomes
+
+This example teaches:
+
+- How to construct effective natural language join predicates
+- When semantic joins are preferable to traditional or similarity-based joins
+- Practical applications in recommendation systems and personalization
+- Understanding the trade-offs between accuracy, performance, and cost
+
+<Tip>
+Semantic joins are perfect for scenarios where the relationship between data is conceptual rather than exact, and where human-like reasoning is needed to determine matches.
+</Tip>

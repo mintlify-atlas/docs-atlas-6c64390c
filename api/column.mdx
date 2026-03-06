@@ -1,0 +1,472 @@
+---
+title: Column
+description: Column expressions for DataFrame operations
+---
+
+The `Column` class represents a column expression that can be used in DataFrame operations. It provides methods for accessing, transforming, and combining column data.
+
+<Note>
+  Direct construction using `Column()` is not allowed. Create Column references using the `col()` function or DataFrame column access methods.
+</Note>
+
+## Creating Columns
+
+Use the `col()` function to create column references:
+
+```python
+from fenic.api.functions import col
+
+# Reference a column by name
+age_col = col("age")
+
+# Use in DataFrame operations
+df.select(col("name"), col("age"))
+```
+
+## Column Access
+
+### get_item / \[\]
+
+```python
+col.get_item(key: Union[str, int, Column]) -> Column
+col[key]
+```
+
+Access an item in a struct or array column.
+
+<ParamField path="key" type="Union[str, int, Column]" required>
+  - For arrays: integer index or Column expression evaluating to integer
+  - For structs: literal field name (string)
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A Column representing the accessed item
+</ResponseField>
+
+```python
+# Array access
+df.select(col("array_column")[0])
+df.select(col("array_column").get_item(0))
+
+# Struct access
+df.select(col("struct_column")["field_name"])
+df.select(col("struct_column").get_item("field_name"))
+```
+
+### Dot notation for structs
+
+```python
+col.field_name -> Column
+```
+
+Access struct fields using dot notation.
+
+```python
+# Access struct field
+df.select(col("struct_column").field_name)
+```
+
+## Column Transformation
+
+### alias
+
+```python
+col.alias(name: str) -> Column
+```
+
+Create an alias for this column.
+
+<ParamField path="name" type="str" required>
+  The alias name to assign
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  Column with the specified alias
+</ResponseField>
+
+```python
+# Rename column
+df.select(col("original_name").alias("new_name"))
+
+# Name calculated column
+df.select((col("price") * col("quantity")).alias("total_value"))
+```
+
+### cast
+
+```python
+col.cast(data_type: DataType) -> Column
+```
+
+Cast the column to a new data type.
+
+<ParamField path="data_type" type="DataType" required>
+  The target DataType to cast to
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A Column representing the casted expression
+</ResponseField>
+
+```python
+from fenic.core.types import StringType, IntegerType
+
+# Cast integer to string
+df.select(col("int_col").cast(StringType))
+
+# Cast string to integer
+df.select(col("str_col").cast(IntegerType))
+```
+
+<Info>
+  **Type Casting Rules:**
+  
+  Primitive types:
+  - Numeric types can be cast between each other and to/from StringType
+  - Date/Timestamp can be cast between each other and to/from numeric/string types
+  - BooleanType can be cast to/from numeric and string types
+  
+  Complex types:
+  - ArrayType can only be cast to another ArrayType (with castable element types)
+  - StructType can only be cast to another StructType (with matching/castable fields)
+</Info>
+
+## Sorting
+
+### asc / desc
+
+```python
+col.asc() -> Column
+col.desc() -> Column
+```
+
+Mark this column for ascending or descending sort order.
+
+<ResponseField name="Column" type="Column">
+  A sort expression with the specified order
+</ResponseField>
+
+```python
+# Sort ascending
+df.sort(col("age").asc())
+
+# Sort descending
+df.sort(col("age").desc())
+```
+
+### asc_nulls_last / desc_nulls_last
+
+```python
+col.asc_nulls_last() -> Column
+col.desc_nulls_last() -> Column
+```
+
+Sort with nulls appearing last.
+
+<ResponseField name="Column" type="Column">
+  A sort expression with nulls positioned last
+</ResponseField>
+
+```python
+df.sort(col("age").asc_nulls_last())
+df.sort(col("age").desc_nulls_last())
+```
+
+## String Operations
+
+### contains
+
+```python
+col.contains(other: Union[str, Column]) -> Column
+```
+
+Check if the column contains a substring.
+
+<ParamField path="other" type="Union[str, Column]" required>
+  The substring to search for (string or column expression)
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating whether each value contains the substring
+</ResponseField>
+
+```python
+# Find rows with substring
+df.filter(col("name").contains("john"))
+
+# Dynamic pattern from another column
+df.filter(col("text").contains(col("pattern")))
+```
+
+### contains_any
+
+```python
+col.contains_any(others: List[str], case_insensitive: bool = True) -> Column
+```
+
+Check if the column contains any of the specified substrings.
+
+<ParamField path="others" type="List[str]" required>
+  List of substrings to search for
+</ParamField>
+
+<ParamField path="case_insensitive" type="bool" default="True">
+  Whether to perform case-insensitive matching
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating whether each value contains any substring
+</ResponseField>
+
+```python
+# Case-insensitive (default)
+df.filter(col("name").contains_any(["john", "jane"]))
+
+# Case-sensitive
+df.filter(col("name").contains_any(["John", "Jane"], case_insensitive=False))
+```
+
+### starts_with / ends_with
+
+```python
+col.starts_with(other: Union[str, Column]) -> Column
+col.ends_with(other: Union[str, Column]) -> Column
+```
+
+Check if the column starts or ends with a substring.
+
+<ParamField path="other" type="Union[str, Column]" required>
+  The substring to check for
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating whether each value starts/ends with the substring
+</ResponseField>
+
+```python
+# Check prefix
+df.filter(col("name").starts_with("Mr"))
+
+# Check suffix
+df.filter(col("email").ends_with("@gmail.com"))
+```
+
+### like / ilike
+
+```python
+col.like(other: Union[str, Column]) -> Column
+col.ilike(other: Union[str, Column]) -> Column
+```
+
+Check if the column matches a SQL LIKE pattern.
+
+<ParamField path="other" type="Union[str, Column]" required>
+  The SQL LIKE pattern (% matches any sequence, _ matches single character)
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating whether each value matches the pattern
+</ResponseField>
+
+```python
+# Case-sensitive LIKE
+df.filter(col("name").like("J%n"))
+
+# Case-insensitive LIKE
+df.filter(col("name").ilike("j%n"))
+```
+
+### rlike
+
+```python
+col.rlike(other: Union[str, Column]) -> Column
+```
+
+Check if the column matches a regular expression pattern.
+
+<ParamField path="other" type="Union[str, Column]" required>
+  The regular expression pattern to match against
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating whether each value matches the pattern
+</ResponseField>
+
+```python
+# Match phone number pattern
+df.filter(col("phone").rlike(r"^\d{3}-\d{3}-\d{4}$"))
+
+# Match word boundaries
+df.filter(col("text").rlike(r"\bhello\b"))
+```
+
+## Null Checking
+
+### is_null / is_not_null
+
+```python
+col.is_null() -> Column
+col.is_not_null() -> Column
+```
+
+Check if the column contains NULL or non-NULL values.
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating NULL status
+</ResponseField>
+
+```python
+# Filter NULL values
+df.filter(col("some_column").is_null())
+
+# Filter non-NULL values
+df.filter(col("some_column").is_not_null())
+
+# Complex condition
+df.filter(col("col1").is_null() | (col("col2") > 100))
+```
+
+## Membership
+
+### is_in
+
+```python
+col.is_in(other: Union[List[Any], Column]) -> Column
+```
+
+Check if the column is in a list of values or a column expression.
+
+<ParamField path="other" type="Union[List[Any], Column]" required>
+  A list of values or a Column expression
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  A boolean column indicating membership
+</ResponseField>
+
+```python
+# Check against list
+df.filter(col("name").is_in(["Alice", "Bob"]))
+
+# Check against another column
+df.filter(col("name").is_in(col("other_column")))
+```
+
+## Conditional Expressions
+
+### when / otherwise
+
+```python
+col.when(condition: Column, value: Column) -> Column
+col.otherwise(value: Column) -> Column
+```
+
+Evaluates conditions and returns values (similar to SQL CASE WHEN).
+
+<ParamField path="condition" type="Column" required>
+  Boolean expression to test
+</ParamField>
+
+<ParamField path="value" type="Column" required>
+  Value to return when condition is True
+</ParamField>
+
+<ResponseField name="Column" type="Column">
+  Conditional expression
+</ResponseField>
+
+```python
+from fenic.api.functions import when, lit
+
+# Multi-condition expression
+result = (
+    when(col("age") < 18, lit("minor"))
+    .when(col("age") < 65, lit("adult"))
+    .when(col("age") >= 65, lit("senior"))
+    .otherwise(lit("unknown"))
+)
+
+df.select(result.alias("age_category"))
+```
+
+<Warning>
+  - `when()` can only be called on when expressions, not regular columns
+  - All branches must return the same type
+  - Conditions are evaluated in order - first True condition wins
+  - If `otherwise()` is not called, unmatched rows return null
+</Warning>
+
+## Operators
+
+### Comparison Operators
+
+```python
+col > other   # Greater than
+col >= other  # Greater than or equal
+col < other   # Less than
+col <= other  # Less than or equal
+col == other  # Equal
+col != other  # Not equal
+```
+
+```python
+# Numeric comparison
+df.filter(col("age") > 25)
+df.filter(col("salary") >= 50000)
+
+# String comparison
+df.filter(col("name") == "Alice")
+```
+
+### Logical Operators
+
+```python
+col1 & col2   # Logical AND
+col1 | col2   # Logical OR
+~col          # Logical NOT
+```
+
+```python
+# Multiple conditions
+df.filter((col("age") > 25) & (col("age") < 65))
+df.filter((col("city") == "NYC") | (col("city") == "LA"))
+df.filter(~col("is_active"))
+```
+
+<Warning>
+  Use `&`, `|`, `~` for logical operations, NOT `and`, `or`, `not`. Python's boolean operators cannot be overloaded.
+</Warning>
+
+### Arithmetic Operators
+
+```python
+col + other   # Addition
+col - other   # Subtraction
+col * other   # Multiplication
+col / other   # Division
+```
+
+```python
+# Arithmetic operations
+df.select(col("price") * col("quantity"))
+df.select(col("total") / col("count"))
+df.select(col("age") + 1)
+```
+
+## Type Alias
+
+```python
+ColumnOrName = Union[Column, str]
+```
+
+Many DataFrame methods accept either a Column object or a string column name.
+
+```python
+# Both are valid
+df.select(col("name"))  # Column object
+df.select("name")       # String column name
+```
+
+## Aliases
+
+- `getItem` → `get_item`

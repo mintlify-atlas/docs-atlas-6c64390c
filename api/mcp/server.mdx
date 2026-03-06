@@ -1,0 +1,396 @@
+---
+title: 'MCP Server'
+description: 'Create and configure MCP servers for Fenic tools'
+icon: 'server'
+---
+
+## Overview
+
+The `FenicMCPServer` class provides a wrapper around FastMCP that registers Fenic tools (both user-defined and system tools) and serves them via the Model Context Protocol (MCP). This allows LLM agents to query your Fenic data views as structured tools.
+
+<Note>
+  MCP support requires the `mcp` extra: `pip install "fenic[mcp]"` or `pip install fastmcp`
+</Note>
+
+## Constructor
+
+```python
+from fenic.core.mcp import FenicMCPServer
+
+server = FenicMCPServer(
+    session_state=session_state,
+    user_defined_tools=[...],
+    system_tools=[...],
+    server_name="Fenic Views",
+    concurrency_limit=8
+)
+```
+
+## Parameters
+
+<ParamField path="session_state" type="BaseSessionState" required>
+  Fenic session state to use for tool execution. Typically obtained from `session._session_state`.
+</ParamField>
+
+<ParamField path="user_defined_tools" type="list[UserDefinedTool]" required>
+  List of user-created tools. Created using `df.create_tool()`.
+</ParamField>
+
+<ParamField path="system_tools" type="list[SystemTool]" required>
+  List of auto-generated or system-defined tools. Created by wrapping Python functions that return LogicalPlans.
+</ParamField>
+
+<ParamField path="server_name" type="str" default="Fenic Views">
+  Name of the MCP server displayed to clients.
+</ParamField>
+
+<ParamField path="concurrency_limit" type="int" default="8">
+  Maximum number of concurrent tool executions. Protects the backend executor from overload.
+</ParamField>
+
+## Methods
+
+### run()
+
+Run the MCP server synchronously.
+
+```python
+server.run(transport="http", **kwargs)
+```
+
+<ParamField path="transport" type="MCPTransport" default="http">
+  Transport protocol to use. Options: `"http"`, `"stdio"`
+</ParamField>
+
+<ParamField path="kwargs" type="dict">
+  Additional transport-specific arguments to pass to FastMCP.
+  
+  For HTTP transport:
+  - `host` (str): Host address (default: "0.0.0.0")
+  - `port` (int): Port number (default: 8000)
+</ParamField>
+
+### run_async()
+
+Run the MCP server asynchronously.
+
+```python
+await server.run_async(transport="http", **kwargs)
+```
+
+Parameters are the same as `run()`.
+
+### http_app()
+
+Create a Starlette ASGI app for the MCP server.
+
+```python
+app = server.http_app(**kwargs)
+```
+
+Useful for integrating with existing ASGI applications or deploying with ASGI servers like Uvicorn.
+
+## Tool Result Format
+
+All tools return results in the `MCPResultSet` format:
+
+```python
+class MCPResultSet:
+    table_schema: Optional[List[Dict[str, Any]]]  # Column schema
+    rows: Union[List[Dict[str, Any]], str]         # Data or markdown
+    returned_result_count: int                     # Number of rows returned
+    total_result_count: int                        # Total rows before limit
+```
+
+Tools automatically support two output formats:
+- **structured**: Returns `rows` as a list of JSON objects
+- **markdown**: Returns `rows` as a markdown-formatted table
+
+## Examples
+
+### Basic HTTP Server
+
+Create and run a simple MCP server:
+
+```python
+from fenic import Session
+from fenic.core.mcp import FenicMCPServer
+
+# Create session
+session = Session.get_or_create(config=...)
+
+# Create a user-defined tool from a DataFrame
+df = session.read.csv("sales.csv")
+sales_tool = df.create_tool(
+    name="Get Sales Data",
+    description="Retrieve sales data with optional filters",
+    params=[],
+    result_limit=100
+)
+
+# Create the MCP server
+server = FenicMCPServer(
+    session_state=session._session_state,
+    user_defined_tools=[sales_tool],
+    system_tools=[],
+    server_name="Sales Analytics"
+)
+
+# Run the server
+server.run(transport="http", host="0.0.0.0", port=8000)
+```
+
+### Server with Parameterized Tools
+
+Create tools with parameters that agents can customize:
+
+```python
+from fenic import Session, F
+from fenic.core.mcp.types import ToolParam
+
+session = Session.get_or_create(config=...)
+
+# Load data
+df = session.read.csv("customers.csv")
+
+# Create parameterized view
+filtered_df = df.filter(
+    F.col("region") == F.tool_param(
+        "region",
+        description="Geographic region to filter by",
+        allowed_values=["North", "South", "East", "West"]
+    )
+)
+
+# Create tool
+customer_tool = filtered_df.create_tool(
+    name="Get Customers by Region",
+    description="Retrieve customer data filtered by geographic region",
+    params=[
+        ToolParam(
+            name="region",
+            description="Geographic region to filter by",
+            allowed_values=["North", "South", "East", "West"]
+        )
+    ],
+    result_limit=50
+)
+
+# Create and run server
+server = FenicMCPServer(
+    session_state=session._session_state,
+    user_defined_tools=[customer_tool],
+    system_tools=[],
+    server_name="Customer Analytics"
+)
+
+server.run(transport="http", port=8000)
+```
+
+### System Tools
+
+Create system tools from Python functions:
+
+```python
+from fenic import Session
+from fenic.core.mcp.types import SystemTool
+from fenic.core._logical_plan import LogicalPlan
+
+session = Session.get_or_create(config=...)
+
+def get_top_products(limit: int = 10) -> LogicalPlan:
+    """Get top selling products.
+    
+    Args:
+        limit: Number of products to return
+        
+    Returns:
+        LogicalPlan with top products
+    """
+    df = session.read.csv("sales.csv")
+    return (
+        df.group_by("product_name")
+        .agg(F.sum("quantity").alias("total_sold"))
+        .order_by(F.col("total_sold").desc())
+        .limit(limit)
+        .plan
+    )
+
+# Wrap as SystemTool
+top_products_tool = SystemTool(
+    name="Get Top Products",
+    description="Retrieve the top selling products",
+    func=get_top_products,
+    max_result_limit=100,
+    read_only=True,
+    idempotent=True
+)
+
+# Create server
+server = FenicMCPServer(
+    session_state=session._session_state,
+    user_defined_tools=[],
+    system_tools=[top_products_tool],
+    server_name="Product Analytics"
+)
+
+server.run(transport="http", port=8000)
+```
+
+### Async Server with ASGI
+
+Integrate with an ASGI application:
+
+```python
+import asyncio
+from fenic import Session
+from fenic.core.mcp import FenicMCPServer
+
+async def main():
+    session = Session.get_or_create(config=...)
+    
+    # Create tools
+    df = session.read.csv("data.csv")
+    tool = df.create_tool(
+        name="Get Data",
+        description="Retrieve data",
+        params=[],
+        result_limit=100
+    )
+    
+    # Create server
+    server = FenicMCPServer(
+        session_state=session._session_state,
+        user_defined_tools=[tool],
+        system_tools=[],
+    )
+    
+    # Run async
+    await server.run_async(transport="http", port=8000)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Custom ASGI App
+
+Get the ASGI app for custom deployment:
+
+```python
+from fenic import Session
+from fenic.core.mcp import FenicMCPServer
+import uvicorn
+
+session = Session.get_or_create(config=...)
+
+# Create tools
+df = session.read.csv("data.csv")
+tool = df.create_tool(
+    name="Get Data",
+    description="Retrieve data",
+    params=[],
+    result_limit=100
+)
+
+# Create server
+server = FenicMCPServer(
+    session_state=session._session_state,
+    user_defined_tools=[tool],
+    system_tools=[],
+)
+
+# Get ASGI app
+app = server.http_app()
+
+# Run with Uvicorn
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+## Transport Options
+
+### HTTP Transport
+
+Best for network-accessible servers:
+
+```python
+server.run(
+    transport="http",
+    host="0.0.0.0",  # Listen on all interfaces
+    port=8000
+)
+```
+
+### STDIO Transport
+
+Best for local integration with MCP clients:
+
+```python
+server.run(transport="stdio")
+```
+
+## Concurrency Control
+
+The `concurrency_limit` parameter controls how many tool executions can run simultaneously:
+
+```python
+server = FenicMCPServer(
+    session_state=session._session_state,
+    user_defined_tools=[...],
+    system_tools=[...],
+    concurrency_limit=4  # Max 4 concurrent queries
+)
+```
+
+This protects your backend executor from being overwhelmed by parallel requests.
+
+## Tool Hints
+
+System tools can provide hints to MCP clients:
+
+```python
+SystemTool(
+    name="Get Sales",
+    description="Retrieve sales data",
+    func=get_sales,
+    max_result_limit=100,
+    read_only=True,        # Tool doesn't modify data
+    idempotent=True,       # Repeated calls have same effect
+    destructive=False,     # Tool doesn't delete data
+    open_world=False,      # Tool doesn't call external APIs
+)
+```
+
+## Error Handling
+
+The server automatically wraps execution errors in `ToolError` exceptions that are returned to the MCP client:
+
+```python
+from fastmcp.exceptions import ToolError
+
+# Errors in tool execution are caught and formatted
+# The client receives a descriptive error message
+```
+
+## Logging
+
+The MCP server logs tool execution details:
+
+```python
+import logging
+from fenic.logging import configure_logging
+
+# Enable Fenic logging
+configure_logging()
+
+# Server logs include:
+# - Tool execution completion
+# - Query metrics (timing, row counts)
+# - Query details (parameters, filters)
+```
+
+## Related
+
+- [MCP Tools](/api/mcp/tools) - Tool creation and configuration
+- [MCP Server Integration](/integrations/mcp-server) - Integration guide
+- [FastMCP Documentation](https://github.com/jlowin/fastmcp) - Underlying framework

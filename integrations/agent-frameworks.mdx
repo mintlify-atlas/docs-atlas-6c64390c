@@ -1,0 +1,715 @@
+---
+title: "Agent Framework Integration"
+description: "Use Fenic with LangGraph, PydanticAI, CrewAI, and any agent framework"
+---
+
+Fenic is **framework-agnostic** by design. It works with any agent framework that can call tools or Python functions. Rather than replacing your agent runtime, Fenic serves as a **context construction layer** that offloads inference and provides bounded, typed tools to your agents.
+
+## How Fenic Works with Agent Frameworks
+
+```
+┌─────────────────────────────────────────────────┐
+│         Your Agent Framework                     │
+│   (LangGraph, PydanticAI, CrewAI, etc.)         │
+│                                                  │
+│   - Agent reasoning & orchestration              │
+│   - Tool calling                                 │
+│   - Conversation management                      │
+└──────────────┬──────────────────────────────────┘
+               │
+               │ Calls tools/functions
+               │
+┌──────────────▼──────────────────────────────────┐
+│              Fenic Context Layer                 │
+│                                                  │
+│   - Context operations (extract, embed, etc.)    │
+│   - Semantic transforms                          │
+│   - Deterministic transforms                     │
+│   - Inference offloading                         │
+└──────────────┬──────────────────────────────────┘
+               │
+               │ Returns shaped results
+               │
+┌──────────────▼──────────────────────────────────┐
+│           Agent receives clean context           │
+│   - Small, precise results                       │
+│   - Typed structures                             │
+│   - Less context bloat                           │
+└──────────────────────────────────────────────────┘
+```
+
+## The Fenic Approach
+
+| Without Fenic | With Fenic |
+|--------------|-----------|
+| Agent summarizes conversation → tokens consumed | Fenic summarizes → agent gets result; less context bloat |
+| Agent extracts facts → tokens consumed | Fenic extracts → agent gets structured data |
+| Agent searches, filters, aggregates → multiple tool calls | Fenic pre-computes → agent gets precise rows |
+| Context ops compete with reasoning | Less context bloat → agents stay focused on reasoning |
+
+## Integration Methods
+
+Fenic provides two ways to integrate with agent frameworks:
+
+### 1. MCP Tools (Recommended)
+
+Expose Fenic context as MCP tools that any framework can call:
+
+```python
+import fenic as fc
+from fenic.api.mcp import create_mcp_server
+
+# Build context in Fenic
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="agent_context"))
+
+# Create and populate context tables
+df = build_context_table(session)
+df.write.save_as_table("agent_context", mode="overwrite")
+
+# Serve via MCP
+server = create_mcp_server(
+    session=session,
+    server_name="Agent Context",
+    table_names=["agent_context"]
+)
+server.run(transport="http", port=8000)
+```
+
+Then connect your agent framework to the MCP server.
+
+### 2. Direct Python Functions
+
+Call Fenic directly from your agent code:
+
+```python
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="agent"))
+
+def get_user_preferences(user_id: str):
+    """Tool: Get user preferences from Fenic context"""
+    prefs = (
+        session.table("user_prefs")
+        .filter(fc.col("user_id") == fc.lit(user_id))
+        .select("category", "value")
+    )
+    return prefs.collect()
+
+# Register this function as a tool in your framework
+```
+
+## Framework-Specific Examples
+
+### LangGraph
+
+Use Fenic to build context, then expose as LangGraph tools:
+
+<CodeGroup>
+```python MCP Integration
+from langgraph.prebuilt import create_react_agent
+from langchain_openai import ChatOpenAI
+from langchain_mcp import MCPToolkit
+
+# Fenic MCP server running on http://localhost:8000
+toolkit = MCPToolkit(server_url="http://localhost:8000")
+
+agent = create_react_agent(
+    model=ChatOpenAI(model="gpt-4"),
+    tools=toolkit.get_tools()
+)
+
+# Agent can now call Fenic context tools
+response = agent.invoke({
+    "messages": [
+        ("user", "What are the user's food preferences?")
+    ]
+})
+```
+
+```python Direct Integration
+from langgraph.prebuilt import create_react_agent
+from langchain_openai import ChatOpenAI
+from langchain_core.tools import tool
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="langgraph"))
+
+@tool
+def get_preferences(user_id: str) -> list[dict]:
+    """Get user preferences from Fenic context"""
+    return (
+        session.table("preferences")
+        .filter(fc.col("user_id") == fc.lit(user_id))
+        .collect()
+    )
+
+agent = create_react_agent(
+    model=ChatOpenAI(model="gpt-4"),
+    tools=[get_preferences]
+)
+```
+</CodeGroup>
+
+### PydanticAI
+
+Fenic's typed DataFrames work naturally with PydanticAI's type system:
+
+<CodeGroup>
+```python MCP Integration
+from pydantic_ai import Agent
+from pydantic_ai.mcp import MCPClient
+
+# Connect to Fenic MCP server
+mcp_client = MCPClient(url="http://localhost:8000")
+
+agent = Agent(
+    'openai:gpt-4',
+    tools=mcp_client.get_tools()
+)
+
+result = await agent.run("Search for refund policy questions")
+```
+
+```python Direct Integration
+from pydantic_ai import Agent, RunContext
+from pydantic import BaseModel
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="pydantic"))
+
+class UserContext(BaseModel):
+    user_id: str
+    preferences: list[dict]
+    recent_activity: list[dict]
+
+agent = Agent('openai:gpt-4')
+
+@agent.tool
+async def get_user_context(ctx: RunContext[None], user_id: str) -> UserContext:
+    """Get comprehensive user context from Fenic"""
+    prefs = session.table("preferences").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    ).collect()
+    
+    activity = session.table("activity").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    ).sort(fc.col("timestamp").desc()).limit(10).collect()
+    
+    return UserContext(
+        user_id=user_id,
+        preferences=prefs,
+        recent_activity=activity
+    )
+
+result = await agent.run("Analyze user user123's activity")
+```
+</CodeGroup>
+
+### CrewAI
+
+Expose Fenic context as CrewAI tools:
+
+```python
+from crewai import Agent, Task, Crew
+from crewai.tools import BaseTool
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="crew"))
+
+class FenicContextTool(BaseTool):
+    name: str = "Search Context"
+    description: str = "Search through preprocessed context data"
+    
+    def _run(self, query: str) -> str:
+        results = (
+            session.table("context")
+            .filter(fc.col("content").rlike(query))
+            .limit(10)
+            .collect()
+        )
+        return str(results)
+
+researcher = Agent(
+    role="Researcher",
+    goal="Find relevant information",
+    tools=[FenicContextTool()]
+)
+
+task = Task(
+    description="Research user preferences for product recommendations",
+    agent=researcher
+)
+
+crew = Crew(agents=[researcher], tasks=[task])
+result = crew.kickoff()
+```
+
+### Custom Frameworks
+
+Any framework that calls Python functions can use Fenic:
+
+```python
+import fenic as fc
+from your_framework import Agent, Tool
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="custom"))
+
+# Define context access functions
+def search_docs(query: str, limit: int = 10):
+    """Search documentation with semantic similarity"""
+    q = session.create_dataframe([{"query": query}])
+    return q.semantic.sim_join(
+        session.table("docs"),
+        left_on=fc.semantic.embed(fc.col("query")),
+        right_on=fc.col("embedding"),
+        k=limit
+    ).collect()
+
+def get_user_profile(user_id: str):
+    """Get user profile and preferences"""
+    return session.table("users").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    ).collect()
+
+# Register as tools in your framework
+agent = Agent(tools=[
+    Tool(name="search_docs", func=search_docs),
+    Tool(name="get_user_profile", func=get_user_profile)
+])
+```
+
+## Real-World Pattern: Memory & Retrieval
+
+Build curated memory packs and retrieval systems that agents can query:
+
+<CodeGroup>
+```python Memory - Facts
+from pydantic import BaseModel, Field
+import fenic as fc
+
+class UserFact(BaseModel):
+    category: str = Field(description="Fact category")
+    value: str = Field(description="Fact value")
+
+session = fc.Session.get_or_create(fc.SessionConfig(
+    app_name="memory",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "gpt": fc.OpenAILanguageModel(model_name="gpt-4.1-nano", rpm=100, tpm=100_000)
+        },
+        embedding_models={
+            "embed": fc.OpenAIEmbeddingModel(model_name="text-embedding-3-small", rpm=100, tpm=100_000)
+        }
+    )
+))
+
+# Extract and embed facts
+messages = session.create_dataframe([
+    {"user_id": "user123", "message": "I'm vegetarian and allergic to nuts"},
+    {"user_id": "user123", "message": "I prefer morning meetings"},
+])
+
+facts = (
+    messages.select(
+        fc.col("user_id"),
+        fc.semantic.extract(fc.col("message"), UserFact).alias("fact"),
+        fc.semantic.embed(fc.col("message")).alias("vec")
+    )
+    .unnest("fact")
+)
+facts.write.save_as_table("user_facts", mode="overwrite")
+
+# Agent tool: semantic recall
+def recall_facts(user_id: str, query: str, k: int = 5):
+    user_facts = session.table("user_facts").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    )
+    q = session.create_dataframe([{"q": query}])
+    return q.semantic.sim_join(
+        user_facts,
+        left_on=fc.semantic.embed(fc.col("q")),
+        right_on=fc.col("vec"),
+        k=k
+    ).select("category", "value").collect()
+```
+
+```python Retrieval - Chunked Docs
+from pydantic import BaseModel
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(
+    app_name="retrieval",
+    semantic=fc.SemanticConfig(
+        embedding_models={
+            "embed": fc.OpenAIEmbeddingModel(model_name="text-embedding-3-small", rpm=100, tpm=100_000)
+        }
+    )
+))
+
+# Parse PDFs, chunk, embed
+chunks = (
+    session.read.pdf_metadata("docs/**/*.pdf")
+    .select(
+        fc.col("file_path").alias("source"),
+        fc.semantic.parse_pdf(fc.col("file_path")).alias("content")
+    )
+    .select(
+        fc.col("source"),
+        fc.text.recursive_word_chunk(
+            fc.col("content").cast(fc.StringType),
+            chunk_size=500,
+            chunk_overlap_percentage=10
+        ).alias("chunks")
+    )
+    .explode("chunks")
+    .select(
+        "source",
+        fc.col("chunks").alias("text"),
+        fc.semantic.embed(fc.col("chunks")).alias("embedding")
+    )
+)
+chunks.write.save_as_table("doc_chunks", mode="overwrite")
+
+# Agent tool: semantic search
+def search_docs(query: str, k: int = 5):
+    q = session.create_dataframe([{"q": query}])
+    return q.semantic.sim_join(
+        session.table("doc_chunks"),
+        left_on=fc.semantic.embed(fc.col("q")),
+        right_on=fc.col("embedding"),
+        k=k
+    ).select("source", "text").collect()
+```
+</CodeGroup>
+
+## Context Operations (Inference Offloaded)
+
+These operations happen **outside your agent's context window**, reducing bloat:
+
+### Summarization
+
+```python
+# Fenic handles summarization, agent gets result
+summary = (
+    session.table("conversations")
+    .select(
+        fc.col("user_id"),
+        fc.semantic.map(
+            "Summarize this conversation in 2 sentences: {{ messages }}",
+            messages=fc.col("messages")
+        ).alias("summary")
+    )
+)
+summary.write.save_as_table("conversation_summaries", mode="overwrite")
+
+# Agent tool: get summary
+def get_conversation_summary(user_id: str):
+    return session.table("conversation_summaries").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    ).collect()
+```
+
+### Extraction
+
+```python
+from pydantic import BaseModel, Field
+
+class CustomerIntent(BaseModel):
+    intent_type: str = Field(description="Type: question, complaint, request")
+    urgency: str = Field(description="Urgency: low, medium, high")
+    summary: str = Field(description="Brief summary")
+
+# Fenic extracts structure, agent gets typed data
+intents = (
+    session.table("support_tickets")
+    .select(
+        fc.col("ticket_id"),
+        fc.semantic.extract(fc.col("message"), CustomerIntent).alias("intent")
+    )
+    .unnest("intent")
+)
+intents.write.save_as_table("ticket_intents", mode="overwrite")
+
+# Agent gets structured data, not raw text
+def get_urgent_tickets():
+    return session.table("ticket_intents").filter(
+        fc.col("urgency") == fc.lit("high")
+    ).collect()
+```
+
+### Classification
+
+```python
+# Fenic classifies, agent gets categories
+sentiment = (
+    session.table("reviews")
+    .select(
+        fc.col("review_id"),
+        fc.semantic.classify(
+            fc.col("text"),
+            categories=["positive", "negative", "neutral"]
+        ).alias("sentiment")
+    )
+)
+sentiment.write.save_as_table("review_sentiment", mode="overwrite")
+
+# Agent queries pre-classified data
+def get_negative_reviews(product_id: str):
+    return session.table("review_sentiment").filter(
+        (fc.col("product_id") == fc.lit(product_id)) &
+        (fc.col("sentiment") == fc.lit("negative"))
+    ).limit(10).collect()
+```
+
+## Memory Patterns
+
+### Blocks & Episodes
+
+Maintain a profile block with recent timeline:
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+class AccountEvent(BaseModel):
+    event_type: str = Field(description="Event type")
+    status: str = Field(description="Event status")
+
+# Profile block
+profile = session.create_dataframe([{
+    "user_id": "user123",
+    "block_name": "profile",
+    "content": "Name: Taylor; Dept: Finance",
+    "last_updated": datetime.now().isoformat()
+}])
+profile.write.save_as_table("memory_blocks", mode="overwrite")
+
+# Event timeline
+events = session.create_dataframe([
+    {"user_id": "user123", "event": "Failed transaction of $99.99", "timestamp": "2025-01-01"},
+    {"user_id": "user123", "event": "Card expired", "timestamp": "2025-01-05"},
+])
+timeline = (
+    events.select(
+        fc.col("user_id"),
+        fc.col("timestamp"),
+        fc.semantic.extract(fc.col("event"), AccountEvent).alias("data")
+    )
+    .unnest("data")
+)
+timeline.write.save_as_table("event_timeline", mode="overwrite")
+
+# Agent tool: get snapshot
+def get_user_snapshot(user_id: str, last_n: int = 5):
+    profile = session.table("memory_blocks").filter(
+        (fc.col("user_id") == fc.lit(user_id)) &
+        (fc.col("block_name") == fc.lit("profile"))
+    ).collect()
+    
+    recent = session.table("event_timeline").filter(
+        fc.col("user_id") == fc.lit(user_id)
+    ).sort(fc.col("timestamp").desc()).limit(last_n).collect()
+    
+    return {"profile": profile, "recent_events": recent}
+```
+
+### Decaying Resolution
+
+Compress older memories with time windows:
+
+```python
+from datetime import date, timedelta
+
+today = date.today()
+week_ago = today - timedelta(days=7)
+
+# Daily summary (recent)
+daily = (
+    session.table("events")
+    .filter(fc.col("date") >= fc.lit(week_ago))
+    .group_by("user_id", "date")
+    .agg(
+        fc.semantic.reduce(
+            "Summarize today's key events",
+            fc.col("event_text")
+        ).alias("daily_summary")
+    )
+)
+
+# Weekly rollup (older)
+weekly = (
+    session.table("daily_summaries")
+    .filter(fc.col("date") < fc.lit(week_ago))
+    .group_by("user_id", fc.col("date").dt.week())
+    .agg(
+        fc.semantic.reduce(
+            "Summarize this week",
+            fc.col("daily_summary")
+        ).alias("weekly_summary")
+    )
+)
+```
+
+## Best Practices
+
+<Note>
+**Design Principles**
+- **Build context once, use everywhere**: Create Fenic context tables that multiple agents can query
+- **Offload inference**: Let Fenic handle extraction, embedding, summarization outside agent loops
+- **Bounded surfaces**: Expose precise, capped tool responses to prevent context bloat
+- **Type safety**: Use Pydantic schemas for extraction to ensure agents get structured data
+</Note>
+
+<Note>
+**Performance**
+- Cache expensive semantic operations in tables
+- Use `result_limit` to cap tool responses
+- Index frequently queried columns
+- Pre-compute embeddings rather than computing on-demand
+</Note>
+
+<Note>
+**Agent Behavior**
+- Provide clear tool descriptions to guide agent behavior
+- Design tools for specific use cases (not generic database access)
+- Use table descriptions to explain data semantics
+- Start agents with schema exploration tools before querying
+</Note>
+
+## Example: Customer Support Agent
+
+Complete example showing Fenic + any agent framework:
+
+```python
+import fenic as fc
+from fenic.api.mcp import create_mcp_server
+from pydantic import BaseModel, Field
+
+# 1. Configure session with semantic models
+session = fc.Session.get_or_create(fc.SessionConfig(
+    app_name="support",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "gpt": fc.OpenAILanguageModel(model_name="gpt-4.1-nano", rpm=1000, tpm=1_000_000)
+        },
+        embedding_models={
+            "embed": fc.OpenAIEmbeddingModel(model_name="text-embedding-3-small", rpm=1000, tpm=1_000_000)
+        }
+    )
+))
+
+# 2. Build context: extract ticket intents
+class TicketIntent(BaseModel):
+    category: str = Field(description="ticket, billing, technical, other")
+    urgency: str = Field(description="low, medium, high")
+    summary: str = Field(description="Brief summary")
+
+tickets = session.create_dataframe([
+    {"ticket_id": 1, "text": "I can't log in to my account"},
+    {"ticket_id": 2, "text": "URGENT: Payment failed but money was deducted"},
+    {"ticket_id": 3, "text": "When will feature X be available?"},
+])
+
+enriched = (
+    tickets.select(
+        fc.col("ticket_id"),
+        fc.col("text"),
+        fc.semantic.extract(fc.col("text"), TicketIntent).alias("intent"),
+        fc.semantic.embed(fc.col("text")).alias("vec")
+    )
+    .unnest("intent")
+)
+enriched.write.save_as_table("tickets", mode="overwrite")
+
+# 3. Build context: KB articles
+articles = (
+    session.read.pdf_metadata("kb/*.pdf")
+    .select(
+        fc.col("file_path").alias("source"),
+        fc.semantic.parse_pdf(fc.col("file_path")).alias("content")
+    )
+    .select(
+        "source",
+        fc.text.recursive_word_chunk(fc.col("content").cast(fc.StringType), chunk_size=500).alias("chunks")
+    )
+    .explode("chunks")
+    .select(
+        "source",
+        fc.col("chunks").alias("text"),
+        fc.semantic.embed(fc.col("chunks")).alias("vec")
+    )
+)
+articles.write.save_as_table("kb_articles", mode="overwrite")
+
+# 4. Create custom tools
+def search_kb(query: str, k: int = 3):
+    """Search knowledge base for relevant articles"""
+    q = session.create_dataframe([{"q": query}])
+    return q.semantic.sim_join(
+        session.table("kb_articles"),
+        left_on=fc.semantic.embed(fc.col("q")),
+        right_on=fc.col("vec"),
+        k=k
+    ).select("source", "text")._plan
+
+def get_urgent_tickets():
+    """Get all high-urgency tickets"""
+    return session.table("tickets").filter(
+        fc.col("urgency") == fc.lit("high")
+    ).select("ticket_id", "text", "category", "summary")._plan
+
+# 5. Serve via MCP (or use directly in your framework)
+server = create_mcp_server(
+    session=session,
+    server_name="Support Agent Context",
+    table_names=["tickets", "kb_articles"],
+    system_tools=[
+        fc.core.mcp.types.SystemTool(
+            name="search_kb",
+            description="Search knowledge base",
+            func=search_kb,
+            max_result_limit=10
+        ),
+        fc.core.mcp.types.SystemTool(
+            name="get_urgent_tickets",
+            description="Get urgent tickets",
+            func=get_urgent_tickets,
+            max_result_limit=50
+        )
+    ]
+)
+
+# Agent can now call: search_kb, get_urgent_tickets, tickets_schema, tickets_read, etc.
+```
+
+## Framework Comparison
+
+| Framework | Integration Method | Best For |
+|-----------|-------------------|----------|
+| **LangGraph** | MCP + LangChain tools | Complex multi-agent workflows |
+| **PydanticAI** | Direct Python + MCP | Type-safe agent development |
+| **CrewAI** | Custom tools + MCP | Multi-agent collaboration |
+| **AutoGen** | Function calling + MCP | Conversational agents |
+| **Custom** | Direct Python calls | Full control over agent logic |
+
+All frameworks benefit from:
+- Fenic's inference offloading (less context bloat)
+- Pre-computed context (faster agent runs)
+- Typed, bounded tools (more reliable behavior)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Server" icon="server" href="/integrations/mcp-server">
+    Learn how to build and serve MCP tools
+  </Card>
+  <Card title="Semantic Operations" icon="wand-magic-sparkles" href="/api/functions/semantic">
+    Explore extraction, embedding, and classification
+  </Card>
+  <Card title="Examples" icon="code" href="https://github.com/typedef-ai/fenic-examples">
+    See complete agent projects using Fenic
+  </Card>
+  <Card title="LLM Providers" icon="brain" href="/integrations/llm-providers">
+    Configure OpenAI, Anthropic, Google, and more
+  </Card>
+</CardGroup>

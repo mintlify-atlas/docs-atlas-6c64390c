@@ -1,0 +1,541 @@
+---
+title: Semantic Functions
+description: LLM-powered operations for AI-driven data transformations
+---
+
+Semantic functions provide LLM-based operations for extracting, transforming, and analyzing unstructured data. All functions are available via `fc.semantic.*`.
+
+## map
+
+Applies a generation prompt to one or more columns, enabling rich summarization and generation tasks.
+
+```python
+fc.semantic.map(
+    prompt: str,
+    /,
+    *,
+    strict: bool = True,
+    examples: Optional[MapExampleCollection] = None,
+    response_format: Optional[type[BaseModel]] = None,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    temperature: float = 0.0,
+    max_output_tokens: int = 512,
+    request_timeout: TimeoutParam = None,
+    **columns: Column,
+) -> Column
+```
+
+<ParamField path="prompt" type="str" required>
+  A Jinja2 template for the generation prompt. References column values using `{{ column_name }}` syntax. Each placeholder is replaced with the corresponding value from the current row during execution.
+</ParamField>
+
+<ParamField path="strict" type="bool" default="True">
+  If True, when any of the provided columns has a None value for a row, the entire row's output will be None (template is not rendered). If False, None values are handled using Jinja2's null rendering behavior.
+</ParamField>
+
+<ParamField path="examples" type="Optional[MapExampleCollection]">
+  Optional few-shot examples to guide the model's output format and style.
+</ParamField>
+
+<ParamField path="response_format" type="Optional[type[BaseModel]]">
+  Optional Pydantic model to enforce structured output. Must include descriptions for each field.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional language model alias. If None, uses the default model.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Language model temperature.
+</ParamField>
+
+<ParamField path="max_output_tokens" type="int" default="512">
+  Maximum tokens to generate.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request. If None, uses the default timeout (120 seconds).
+</ParamField>
+
+<ParamField path="**columns" type="Column" required>
+  Named column arguments that correspond to template variables. Keys must match the variable names used in the template.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column expression representing the semantic mapping operation.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Basic mapping
+fc.semantic.map(
+    "Write a compelling one-line description for {{ name }}: {{ details }}",
+    name=fc.col("name"),
+    details=fc.col("details")
+)
+```
+
+```python With few-shot examples
+examples = MapExampleCollection()
+examples.create_example(MapExample(
+    input={"name": "GlowMate", "details": "A rechargeable bedside lamp..."},
+    output="The modern touch-controlled lamp for better sleep and style."
+))
+
+fc.semantic.map(
+    "Write a compelling one-line description for {{ name }}: {{ details }}",
+    name=fc.col("name"),
+    details=fc.col("details"),
+    examples=examples
+)
+```
+</CodeGroup>
+
+---
+
+## extract
+
+Extracts structured information from unstructured text using a provided Pydantic model schema.
+
+```python
+fc.semantic.extract(
+    column: ColumnOrName,
+    response_format: type[BaseModel],
+    max_output_tokens: int = 1024,
+    temperature: float = 0.0,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing text to extract from.
+</ParamField>
+
+<ParamField path="response_format" type="type[BaseModel]" required>
+  A Pydantic model type that defines the output structure with descriptions for each field.
+</ParamField>
+
+<ParamField path="max_output_tokens" type="int" default="1024">
+  Optional parameter to constrain the model to generate at most this many tokens.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Optional temperature parameter for the language model.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use for the extraction. If None, will use the language model configured as the default.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request. If None, uses the default timeout (120 seconds).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A new column with structured values (a struct) based on the provided schema.
+</ResponseField>
+
+### Example
+
+```python Extracting knowledge graph triples
+class Triple(BaseModel):
+    subject: str = Field(description="The subject of the triple")
+    predicate: str = Field(description="The predicate or relation")
+    object: str = Field(description="The object of the triple")
+
+class KGResult(BaseModel):
+    triples: List[Triple] = Field(description="List of extracted knowledge graph triples")
+    entities: list[str] = Field(description="Flat list of all detected named entities")
+
+df.select(fc.semantic.extract("blurb", KGResult))
+```
+
+---
+
+## predicate
+
+Applies a boolean predicate to one or more columns, typically used for filtering.
+
+```python
+fc.semantic.predicate(
+    predicate: str,
+    /,
+    *,
+    strict: bool = True,
+    examples: Optional[PredicateExampleCollection] = None,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    temperature: float = 0.0,
+    request_timeout: TimeoutParam = None,
+    **columns: Column,
+) -> Column
+```
+
+<ParamField path="predicate" type="str" required>
+  A Jinja2 template containing a yes/no question or boolean claim. Should reference column values using `{{ column_name }}` syntax. The model will evaluate this condition for each row and return True or False.
+</ParamField>
+
+<ParamField path="strict" type="bool" default="True">
+  If True, when any of the provided columns has a None value for a row, the entire row's output will be None.
+</ParamField>
+
+<ParamField path="examples" type="Optional[PredicateExampleCollection]">
+  Optional few-shot examples showing how to evaluate the predicate.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional language model alias. If None, uses the default model.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Language model temperature.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ParamField path="**columns" type="Column" required>
+  Named column arguments that correspond to template variables.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A boolean column expression.
+</ResponseField>
+
+### Example
+
+```python Filtering wireless products
+wireless_products = df.filter(
+    fc.semantic.predicate(
+        """Product: {{ description }}
+        Is this product wireless or battery-powered?""",
+        description=fc.col("product_description")
+    )
+)
+```
+
+---
+
+## reduce
+
+Aggregate function: reduces a set of strings in a column to a single string using a natural language instruction.
+
+```python
+fc.semantic.reduce(
+    prompt: str,
+    column: ColumnOrName,
+    *,
+    group_context: Optional[Dict[str, Column]] = None,
+    order_by: List[ColumnOrName] = None,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    temperature: float = 0,
+    max_output_tokens: int = 512,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="prompt" type="str" required>
+  A string containing the semantic.reduce prompt. The instruction can optionally include Jinja2 template variables (e.g., `{{variable}}`) that reference columns from the group_context parameter.
+</ParamField>
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column containing documents/strings to reduce.
+</ParamField>
+
+<ParamField path="group_context" type="Optional[Dict[str, Column]]">
+  Optional dictionary mapping variable names to columns. These columns provide context for each group and can be referenced in the instruction template.
+</ParamField>
+
+<ParamField path="order_by" type="List[ColumnOrName]">
+  Optional list of columns to sort grouped documents by before reduction.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use. If None, uses the default model.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Temperature parameter for the language model.
+</ParamField>
+
+<ParamField path="max_output_tokens" type="int" default="512">
+  Maximum tokens the model can generate.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column expression representing the semantic reduction operation.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Simple reduction
+df.group_by("category").agg(
+    fc.semantic.reduce("Summarize the documents", fc.col("document_text"))
+)
+```
+
+```python With group context
+df.group_by("department", "region").agg(
+    fc.semantic.reduce(
+        "Summarize these {{department}} reports from {{region}}",
+        fc.col("document_text"),
+        group_context={
+            "department": fc.col("department"),
+            "region": fc.col("region")
+        }
+    )
+)
+```
+</CodeGroup>
+
+---
+
+## classify
+
+Classifies a string column into one of the provided classes.
+
+```python
+fc.semantic.classify(
+    column: ColumnOrName,
+    classes: Union[List[str], List[ClassDefinition]],
+    examples: Optional[ClassifyExampleCollection] = None,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    temperature: float = 0,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing text to classify.
+</ParamField>
+
+<ParamField path="classes" type="Union[List[str], List[ClassDefinition]]" required>
+  List of class labels or ClassDefinition objects defining the available classes. Use ClassDefinition objects to provide descriptions for the classes.
+</ParamField>
+
+<ParamField path="examples" type="Optional[ClassifyExampleCollection]">
+  Optional collection of example classifications to guide the model.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Optional temperature parameter for the language model.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  Expression containing the classification results.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Basic classification
+fc.semantic.classify("message", ["Account Access", "Billing Issue", "Technical Problem"])
+```
+
+```python With ClassDefinition
+fc.semantic.classify("message", [
+    ClassDefinition(label="Account Access", description="General questions, feature requests..."),
+    ClassDefinition(label="Billing Issue", description="Questions about charges, payments..."),
+    ClassDefinition(label="Technical Problem", description="Problems with product functionality...")
+])
+```
+</CodeGroup>
+
+---
+
+## analyze_sentiment
+
+Analyzes the sentiment of a string column. Returns one of 'positive', 'negative', or 'neutral'.
+
+```python
+fc.semantic.analyze_sentiment(
+    column: ColumnOrName,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    temperature: float = 0,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing text for sentiment analysis.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Optional temperature parameter for the language model.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  Expression containing sentiment results ('positive', 'negative', or 'neutral').
+</ResponseField>
+
+### Example
+
+```python
+fc.semantic.analyze_sentiment(fc.col('user_comment'))
+```
+
+---
+
+## embed
+
+Generate embeddings for the specified string column.
+
+```python
+fc.semantic.embed(
+    column: ColumnOrName,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing the values to generate embeddings for.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the embedding model to use. If None, will use the embedding model configured as the default.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column expression that represents the embeddings for each value in the input column.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.semantic.embed(fc.col("text_column")).alias("text_embeddings"))
+```
+
+---
+
+## summarize
+
+Summarizes strings from a column.
+
+```python
+fc.semantic.summarize(
+    column: ColumnOrName,
+    format: Union[KeyPoints, Paragraph, None] = None,
+    temperature: float = 0,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing text for summarization.
+</ParamField>
+
+<ParamField path="format" type="Union[KeyPoints, Paragraph, None]">
+  Format of the summary to generate. Can be either KeyPoints or Paragraph. If None, will default to Paragraph with a maximum of 120 words.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Optional temperature parameter for the language model.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use for the summarization.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  Expression containing the summarized string.
+</ResponseField>
+
+### Example
+
+```python
+fc.semantic.summarize(fc.col('user_comment'))
+```
+
+---
+
+## parse_pdf
+
+Parses a column of PDF paths into markdown.
+
+```python
+fc.semantic.parse_pdf(
+    column: ColumnOrName,
+    model_alias: Optional[Union[str, ModelAlias]] = None,
+    page_separator: Optional[str] = None,
+    describe_images: bool = False,
+    max_output_tokens: Optional[int] = None,
+    request_timeout: TimeoutParam = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing the PDF to parse.
+</ParamField>
+
+<ParamField path="model_alias" type="Optional[Union[str, ModelAlias]]">
+  Optional alias for the language model to use for the parsing.
+</ParamField>
+
+<ParamField path="page_separator" type="Optional[str]">
+  Optional page separator to use for the parsing. If the separator includes the `{page}` placeholder, the model will replace it with the current page number.
+</ParamField>
+
+<ParamField path="describe_images" type="bool" default="False">
+  Flag to describe images in the PDF. If True, the prompt will ask the model to include a description of the image in the markdown output. If False, the prompt asks the model to ignore images that aren't tables or charts.
+</ParamField>
+
+<ParamField path="max_output_tokens" type="Optional[int]">
+  Optional maximum number of output tokens per ~3 pages of PDF (does not include reasoning tokens). If None, don't constrain the model's output.
+</ParamField>
+
+<ParamField path="request_timeout" type="TimeoutParam">
+  Optional timeout in seconds for a single LLM request.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A dataframe with markdown strings for each PDF file.
+</ResponseField>
+
+<Note>
+For Gemini models, this function uses the google file API, uploading PDF files to Google's file store and deleting them after each request.
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Basic PDF parsing
+fc.semantic.parse_pdf(fc.col("pdf_path")).show()
+```
+
+```python With page separator and image descriptions
+pdf_markdown = fc.semantic.parse_pdf(
+    fc.col("pdf_path"),
+    page_separator="--- PAGE {page} ---",
+    describe_images=True
+)
+pdf_markdown.select(fc.col("markdown_content")).show()
+```
+</CodeGroup>

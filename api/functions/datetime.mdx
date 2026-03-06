@@ -1,0 +1,478 @@
+---
+title: Date/Time Functions
+description: Functions for working with dates, times, and timestamps
+---
+
+Date and time functions provide tools for parsing, formatting, and manipulating temporal data. All functions are available via `fc.dt.*`.
+
+## Extraction Functions
+
+### year
+
+Extract the year from a date column.
+
+```python
+fc.dt.year(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to extract the year from.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the year extracted.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.year(fc.col("date")))
+# dates: "2025-01-01", "2025-01-02", "2025-01-03"
+# Output: [2025, 2025, 2025]
+```
+
+---
+
+### month
+
+Extract the month from a date column.
+
+```python
+fc.dt.month(column: ColumnOrName) -> Column
+```
+
+---
+
+### day
+
+Extract the day from a date column.
+
+```python
+fc.dt.day(column: ColumnOrName) -> Column
+```
+
+---
+
+### hour
+
+Extract the hour from a timestamp column.
+
+```python
+fc.dt.hour(column: ColumnOrName) -> Column
+```
+
+<Note>
+This will return 0 for DateType columns.
+</Note>
+
+---
+
+### minute
+
+Extract the minute from a timestamp column.
+
+```python
+fc.dt.minute(column: ColumnOrName) -> Column
+```
+
+---
+
+### second
+
+Extract the second from a timestamp column.
+
+```python
+fc.dt.second(column: ColumnOrName) -> Column
+```
+
+---
+
+### millisecond
+
+Extract the millisecond from a timestamp column.
+
+```python
+fc.dt.millisecond(column: ColumnOrName) -> Column
+```
+
+---
+
+## Conversion Functions
+
+### to_date
+
+Transform a string into a DateType.
+
+```python
+fc.dt.to_date(
+    column: ColumnOrName,
+    format: Optional[str] = None
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to transform into a DateType.
+</ParamField>
+
+<ParamField path="format" type="Optional[str]">
+  The format of the date string. If not provided, the default format is "YYYY-MM-DD". The accepted formats should follow the [Spark datetime pattern](https://spark.apache.org/docs/latest/sql-ref-datetime-pattern.html).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the DateType transformed.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.to_date(fc.col("date_str"), format="MM-dd-yyyy").alias("date"))
+```
+
+---
+
+### to_timestamp
+
+Transform a string into a TimestampType.
+
+```python
+fc.dt.to_timestamp(
+    column: ColumnOrName,
+    format: Optional[str] = None
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to transform into a TimestampType.
+</ParamField>
+
+<ParamField path="format" type="Optional[str]">
+  The format of the timestamp string. If not provided, the default format is ISO 8601 with milliseconds. The accepted formats should follow the [Spark datetime pattern](https://spark.apache.org/docs/latest/sql-ref-datetime-pattern.html).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the `TimestampType` type, with a UTC timezone. If the provided `format` contains a timezone specifier, the result timestamp value will be converted from the `format` timezone to UTC.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.to_timestamp(fc.col("date_str"), format="MM-dd-yyyy HH:mm:ss"))
+```
+
+---
+
+### date_format
+
+Formats a date/timestamp column to a given format.
+
+```python
+fc.dt.date_format(column: ColumnOrName, format: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to format.
+</ParamField>
+
+<ParamField path="format" type="str" required>
+  The format to format the column to. The accepted formats should follow the [Spark datetime pattern](https://spark.apache.org/docs/latest/sql-ref-datetime-pattern.html).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the date/timestamp column formatted into a string.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.date_format(fc.col("date"), "MM-dd-yyyy hh:mm:ss a"))
+# Output: ['01-01-2025 10:00:00 AM', '02-01-2025 11:00:00 AM', ...]
+```
+
+---
+
+## Current Time Functions
+
+### now
+
+Get the current date and time.
+
+```python
+fc.dt.now() -> Column
+```
+
+<ResponseField name="return" type="Column">
+  A Column object with the current date and time. The type of the column is TimestampType.
+</ResponseField>
+
+---
+
+### current_timestamp
+
+Get the current date and time.
+
+```python
+fc.dt.current_timestamp() -> Column
+```
+
+<ResponseField name="return" type="Column">
+  A Column object with the current date and time. The type of the column is TimestampType in UTC timezone.
+</ResponseField>
+
+---
+
+### current_date
+
+Get the current date.
+
+```python
+fc.dt.current_date() -> Column
+```
+
+<ResponseField name="return" type="Column">
+  A Column object with the current date. The type of the column is DateType.
+</ResponseField>
+
+---
+
+## Arithmetic Functions
+
+### date_add
+
+Adds the number of days to the date/timestamp column.
+
+```python
+fc.dt.date_add(
+    column: ColumnOrName,
+    days: Union[int, ColumnOrName]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to add the days to.
+</ParamField>
+
+<ParamField path="days" type="Union[int, ColumnOrName]" required>
+  The number of days to add to the date/timestamp column. If the days is negative, the days will be subtracted.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the date/timestamp column with the days added.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.date_add(fc.col("date"), 1).alias("date_add"))
+# dates: "2025-01-01", "2025-02-01", "2025-03-01"
+# Output: ['2025-01-02', '2025-02-02', '2025-03-02']
+```
+
+---
+
+### date_sub
+
+Subtracts the number of days from the date/timestamp column.
+
+```python
+fc.dt.date_sub(
+    column: ColumnOrName,
+    days: Union[int, ColumnOrName]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to subtract the days from.
+</ParamField>
+
+<ParamField path="days" type="Union[int, ColumnOrName]" required>
+  The amount of days to subtract. If the days is negative, the days will be added.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the date/timestamp column with the days subtracted.
+</ResponseField>
+
+---
+
+### timestamp_add
+
+Adds the quantity of the given unit to the timestamp column.
+
+```python
+fc.dt.timestamp_add(
+    column: ColumnOrName,
+    quantity: Union[int, ColumnOrName],
+    unit: DateTimeUnit
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to add the quantity to.
+</ParamField>
+
+<ParamField path="quantity" type="Union[int, ColumnOrName]" required>
+  The quantity to add. If the quantity is negative, the quantity will be subtracted.
+</ParamField>
+
+<ParamField path="unit" type="DateTimeUnit" required>
+  The unit of the quantity. Supported units: `"year"`, `"month"`, `"day"`, `"hour"`, `"minute"`, `"second"`, `"millisecond"`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the timestamp column with the quantity added.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.timestamp_add(fc.col("ts"), 1, "day"))
+```
+
+---
+
+### datediff
+
+Calculates the number of days between two date/timestamp columns.
+
+```python
+fc.dt.datediff(end: ColumnOrName, start: ColumnOrName) -> Column
+```
+
+<ParamField path="end" type="ColumnOrName" required>
+  To date column to work on.
+</ParamField>
+
+<ParamField path="start" type="ColumnOrName" required>
+  From date column to work on.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the difference in days between the two date/timestamp columns.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.datediff(fc.col("end"), fc.col("start")))
+# end: "2025-01-01", "2025-02-02", "2025-03-06"
+# start: "2025-01-02", "2025-02-01", "2025-03-02"
+# Output: [-1, 1, 4]
+```
+
+---
+
+### timestamp_diff
+
+Calculates the difference between two timestamp columns.
+
+```python
+fc.dt.timestamp_diff(
+    start: ColumnOrName,
+    end: ColumnOrName,
+    unit: DateTimeUnit
+) -> Column
+```
+
+<ParamField path="start" type="ColumnOrName" required>
+  The first column to calculate the difference from.
+</ParamField>
+
+<ParamField path="end" type="ColumnOrName" required>
+  The second column to calculate the difference from.
+</ParamField>
+
+<ParamField path="unit" type="DateTimeUnit" required>
+  The unit of the difference. Supported units: `"year"`, `"month"`, `"day"`, `"hour"`, `"minute"`, `"second"`, `"millisecond"`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the difference in the given unit between the two timestamp columns.
+</ResponseField>
+
+---
+
+## Truncation Functions
+
+### date_trunc
+
+Truncate a date to a given unit.
+
+```python
+fc.dt.date_trunc(column: ColumnOrName, unit: DateTimeUnit) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column to truncate.
+</ParamField>
+
+<ParamField path="unit" type="DateTimeUnit" required>
+  The unit to truncate to. Supported units: `"year"`, `"month"`, `"day"`, `"hour"`, `"minute"`, `"second"`, `"millisecond"`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with the date truncated.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.dt.date_trunc(fc.col("date"), "year"))
+# dates: "2025-01-01", "2025-02-01", "2025-03-01"
+# Output: ['2025-01-01', '2025-01-01', '2025-01-01']
+```
+
+---
+
+## Timezone Functions
+
+### to_utc_timestamp
+
+Accepts a Column with TimestampType (UTC), interprets each value as wall-clock time in the specified timezone, and converts it to a timestamp in UTC.
+
+```python
+fc.dt.to_utc_timestamp(column: ColumnOrName, tz: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column containing the timestamp. Will be treated as timezone-agnostic.
+</ParamField>
+
+<ParamField path="tz" type="str" required>
+  A timezone that the input should be converted to.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with timestamp expressed in UTC.
+</ResponseField>
+
+<Note>
+In fenic, the TimestampType data type is always in UTC. This function treats the input timestamp as timezone-agnostic, sets it to the requested timezone (without changing the timestamp), then converts the timestamp to UTC.
+
+See [Spark documentation](https://spark.apache.org/docs/4.0.1/api/python/reference/pyspark.sql/api/pyspark.sql.functions.to_utc_timestamp.html) for more details.
+</Note>
+
+---
+
+### from_utc_timestamp
+
+Accepts a Column with TimestampType (UTC). For each row, converts the timestamp value to the provided timezone, then renders that timestamp as UTC without changing the timestamp value.
+
+```python
+fc.dt.from_utc_timestamp(column: ColumnOrName, tz: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The column containing the timestamp.
+</ParamField>
+
+<ParamField path="tz" type="str" required>
+  A timezone that the input will be converted from.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column object with timestamp expressed in UTC.
+</ResponseField>
+
+<Note>
+See [Spark documentation](https://spark.apache.org/docs/4.0.1/api/python/reference/pyspark.sql/api/pyspark.sql.functions.from_utc_timestamp.html) for more details.
+</Note>

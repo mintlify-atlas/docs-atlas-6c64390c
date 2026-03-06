@@ -1,0 +1,297 @@
+---
+title: GroupedData
+description: Methods for aggregations on grouped DataFrames
+---
+
+The `GroupedData` class provides methods for performing aggregations on grouped DataFrames. It is returned by `DataFrame.group_by()` and should not be instantiated directly.
+
+<Note>
+  GroupedData objects are created by calling `df.group_by()` on a DataFrame.
+</Note>
+
+## Creating GroupedData
+
+GroupedData is returned by the `group_by()` method on DataFrames:
+
+```python
+# Create grouped data
+grouped = df.group_by("department")
+
+# Group by multiple columns
+grouped = df.group_by("department", "location")
+
+# Group by expressions
+grouped = df.group_by(lower(col("department")))
+```
+
+## Aggregation Methods
+
+### agg
+
+```python
+grouped.agg(*exprs: Union[Column, Dict[str, str]]) -> DataFrame
+```
+
+Compute aggregations on grouped data and return the result as a DataFrame.
+
+<ParamField path="exprs" type="Union[Column, Dict[str, str]]" required>
+  Aggregation expressions. Can be:
+  - Column expressions with aggregate functions (e.g., `count("*")`, `sum("amount")`)
+  - A dictionary mapping column names to aggregate function names (e.g., `{"amount": "sum", "age": "avg"}`)
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame with one row per group and columns for group keys and aggregated values
+</ResponseField>
+
+<CodeGroup>
+```python Single Aggregation
+from fenic.api.functions import count
+
+# Count employees by department
+df.group_by("department").agg(
+    count("*").alias("employee_count")
+)
+```
+
+```python Multiple Aggregations
+from fenic.api.functions import count, avg, max
+
+# Multiple aggregations
+df.group_by("department").agg(
+    count("*").alias("employee_count"),
+    avg("salary").alias("avg_salary"),
+    max("age").alias("max_age")
+)
+```
+
+```python Dictionary Style
+# Dictionary-style aggregations
+df.group_by("department", "location").agg({
+    "salary": "avg",
+    "age": "max"
+})
+```
+
+```python Group by Expression
+from fenic.api.functions import lower
+
+# Group by lowercase department name
+df.group_by(lower(col("department"))).agg(
+    count("*").alias("count")
+)
+```
+</CodeGroup>
+
+## Available Aggregate Functions
+
+The following aggregate functions can be used with `agg()`:
+
+### Count Functions
+
+- `count(col)` - Count non-null values
+- `count("*")` - Count all rows including nulls
+- `count_distinct(col)` - Count distinct values
+
+### Numeric Aggregations
+
+- `sum(col)` - Sum of values
+- `avg(col)` - Average of values
+- `mean(col)` - Alias for avg
+- `min(col)` - Minimum value
+- `max(col)` - Maximum value
+- `stddev(col)` - Standard deviation
+- `variance(col)` - Variance
+
+### Collection Functions
+
+- `collect_list(col)` - Collect values into a list
+- `collect_set(col)` - Collect unique values into a set
+
+### Statistical Functions
+
+- `first(col)` - First value in the group
+- `last(col)` - Last value in the group
+- `approx_count_distinct(col)` - Approximate count of distinct values
+
+## Dictionary Aggregation Syntax
+
+When using dictionary syntax, the following function names are supported:
+
+- `"sum"` - Sum of values
+- `"avg"` or `"mean"` - Average
+- `"min"` - Minimum
+- `"max"` - Maximum
+- `"count"` - Count non-null
+- `"stddev"` - Standard deviation
+- `"variance"` - Variance
+- `"first"` - First value
+- `"last"` - Last value
+
+```python
+df.group_by("category").agg({
+    "amount": "sum",
+    "price": "avg",
+    "quantity": "max",
+    "id": "count"
+})
+```
+
+## Usage Patterns
+
+### Single Group Column
+
+```python
+# Group by department and count
+result = df.group_by("department").agg(
+    count("*").alias("total")
+)
+
+# Output:
+# department | total
+# -----------|------
+# IT         |    10
+# HR         |     5
+# Sales      |     8
+```
+
+### Multiple Group Columns
+
+```python
+# Group by department and location
+result = df.group_by("department", "location").agg(
+    avg("salary").alias("avg_salary"),
+    count("*").alias("count")
+)
+
+# Output:
+# department | location | avg_salary | count
+# -----------|----------|------------|------
+# IT         | NYC      |   85000.0  |    5
+# IT         | LA       |   80000.0  |    5
+# HR         | NYC      |   70000.0  |    3
+```
+
+### Complex Aggregations
+
+```python
+from fenic.api.functions import sum, avg, min, max, count
+
+# Multiple metrics per group
+result = df.group_by("department").agg(
+    count("*").alias("employee_count"),
+    sum("salary").alias("total_salary"),
+    avg("salary").alias("avg_salary"),
+    min("salary").alias("min_salary"),
+    max("salary").alias("max_salary"),
+    sum(col("salary") * col("bonus_pct")).alias("total_bonus")
+)
+```
+
+### Filtering After Aggregation
+
+```python
+# Group and filter
+result = (
+    df.group_by("department")
+    .agg(count("*").alias("employee_count"))
+    .filter(col("employee_count") > 5)
+)
+```
+
+### Sorting Aggregated Results
+
+```python
+# Group, aggregate, and sort
+result = (
+    df.group_by("department")
+    .agg(
+        avg("salary").alias("avg_salary"),
+        count("*").alias("count")
+    )
+    .sort(col("avg_salary").desc())
+)
+```
+
+## Common Patterns
+
+### Calculate Percentages
+
+```python
+# Count by category and calculate percentage
+total = df.count()
+result = (
+    df.group_by("category")
+    .agg(count("*").alias("count"))
+    .with_column(
+        "percentage",
+        (col("count") / total) * 100
+    )
+)
+```
+
+### Top N per Group
+
+```python
+from fenic.api.window import Window
+from fenic.api.functions import row_number
+
+# Get top 3 salaries per department
+window = Window.partition_by("department").order_by(col("salary").desc())
+
+result = (
+    df.with_column("rank", row_number().over(window))
+    .filter(col("rank") <= 3)
+)
+```
+
+### Multiple Aggregation Levels
+
+```python
+# Department-level aggregation
+dept_stats = df.group_by("department").agg(
+    avg("salary").alias("dept_avg_salary")
+)
+
+# Location-level aggregation
+loc_stats = df.group_by("location").agg(
+    avg("salary").alias("loc_avg_salary")
+)
+
+# Combine both
+result = (
+    df.join(dept_stats, on="department")
+    .join(loc_stats, on="location")
+)
+```
+
+## Error Handling
+
+<Warning>
+  **Common Errors:**
+  
+  - Using non-aggregate functions in `agg()` will raise a `ValidationError`
+  - Dictionary values must be valid aggregate function names
+  - Grouping by literal values raises `ValueError`
+</Warning>
+
+```python
+# ERROR: Cannot use non-aggregate function
+df.group_by("department").agg(
+    col("name")  # ValidationError!
+)
+
+# CORRECT: Use aggregate function
+df.group_by("department").agg(
+    collect_list("name").alias("names")
+)
+```
+
+## Notes
+
+<Info>
+  - The order of rows in the output is not guaranteed unless you explicitly sort
+  - NULL values are treated as a separate group
+  - Empty groups are not included in the result
+  - All aggregate functions ignore NULL values except `count("*")`
+</Info>

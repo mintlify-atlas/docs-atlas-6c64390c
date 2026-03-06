@@ -1,0 +1,338 @@
+---
+title: Schema
+description: Define and work with DataFrame schemas
+---
+
+Schemas define the structure of DataFrames by specifying column names and their data types.
+
+## Schema
+
+Represents the complete schema of a DataFrame.
+
+<ParamField path="column_fields" type="List[ColumnField]" required>
+  An ordered list of ColumnField objects that define the structure of the DataFrame.
+</ParamField>
+
+### Methods
+
+#### column_names()
+
+Get a list of all column names in the schema.
+
+**Returns:** `List[str]` - List of column names
+
+```python
+schema = fc.Schema([
+    fc.ColumnField("id", fc.IntegerType),
+    fc.ColumnField("name", fc.StringType)
+])
+
+columns = schema.column_names()
+# Returns: ['id', 'name']
+```
+
+### Examples
+
+<CodeGroup>
+```python Basic schema
+import fenic as fc
+from fenic import Schema, ColumnField, IntegerType, StringType
+
+schema = Schema([
+    ColumnField("id", IntegerType),
+    ColumnField("name", StringType)
+])
+```
+
+```python Schema with complex types
+import fenic as fc
+from fenic import (
+    Schema, ColumnField, ArrayType, StructType, 
+    StructField, StringType, IntegerType
+)
+
+schema = Schema([
+    ColumnField("id", IntegerType),
+    ColumnField("tags", ArrayType(StringType)),
+    ColumnField("metadata", StructType([
+        StructField("created_at", StringType),
+        StructField("version", IntegerType)
+    ]))
+])
+```
+
+```python Creating a table with schema
+import fenic as fc
+
+session = fc.Session.get_or_create()
+
+schema = fc.Schema([
+    fc.ColumnField("user_id", fc.IntegerType),
+    fc.ColumnField("email", fc.StringType),
+    fc.ColumnField("created_at", fc.TimestampType)
+])
+
+session.catalog.create_table(
+    "users",
+    schema,
+    description="User accounts table"
+)
+```
+</CodeGroup>
+
+---
+
+## ColumnField
+
+Represents a typed column in a DataFrame schema.
+
+<ParamField path="name" type="str" required>
+  The name of the column.
+</ParamField>
+
+<ParamField path="data_type" type="DataType" required>
+  The data type of the column.
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+```python String column
+from fenic import ColumnField, StringType
+
+field = ColumnField("name", StringType)
+```
+
+```python Integer column
+from fenic import ColumnField, IntegerType
+
+field = ColumnField("age", IntegerType)
+```
+
+```python Array column
+from fenic import ColumnField, ArrayType, StringType
+
+field = ColumnField("tags", ArrayType(StringType))
+```
+
+```python Struct column
+from fenic import ColumnField, StructType, StructField, StringType, IntegerType
+
+field = ColumnField(
+    "address",
+    StructType([
+        StructField("street", StringType),
+        StructField("zip", IntegerType)
+    ])
+)
+```
+</CodeGroup>
+
+---
+
+## DatasetMetadata
+
+Contains metadata about a dataset (table or view), including its schema and description.
+
+<ParamField path="schema" type="Schema" required>
+  The schema of the dataset.
+</ParamField>
+
+<ParamField path="description" type="str | None" required>
+  The natural language description of the dataset's contents.
+</ParamField>
+
+### Example
+
+```python
+import fenic as fc
+
+session = fc.Session.get_or_create()
+
+# Create a table
+schema = fc.Schema([
+    fc.ColumnField("id", fc.IntegerType),
+    fc.ColumnField("name", fc.StringType)
+])
+session.catalog.create_table(
+    "my_table",
+    schema,
+    description="A table containing user information"
+)
+
+# Get metadata
+metadata = session.catalog.describe_table("my_table")
+print(metadata.schema)        # Schema with id and name columns
+print(metadata.description)   # "A table containing user information"
+```
+
+---
+
+## Schema Inference
+
+Fenic automatically infers schemas when reading data:
+
+### CSV Files
+
+```python
+# Schema is automatically inferred from CSV headers and data
+df = session.read.csv("data.csv")
+
+# View inferred schema
+df.print_schema()
+```
+
+### Parquet Files
+
+```python
+# Schema is read from Parquet metadata
+df = session.read.parquet("data.parquet")
+
+df.print_schema()
+```
+
+### Python Data
+
+```python
+# Schema is inferred from Python types
+df = session.create_dataframe({
+    "id": [1, 2, 3],
+    "name": ["Alice", "Bob", "Charlie"],
+    "scores": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+})
+
+df.print_schema()
+# Schema(
+#     ColumnField(name='id', data_type=IntegerType),
+#     ColumnField(name='name', data_type=StringType),
+#     ColumnField(name='scores', data_type=ArrayType(element_type=IntegerType))
+# )
+```
+
+---
+
+## Explicit Schema Specification
+
+You can provide explicit schemas when reading CSV files:
+
+```python
+import fenic as fc
+from fenic import Schema, ColumnField, IntegerType, FloatType, StringType
+
+# Define schema with specific types
+schema = Schema([
+    ColumnField("id", IntegerType),
+    ColumnField("amount", FloatType),
+    ColumnField("description", StringType)
+])
+
+# Read CSV with explicit schema
+df = session.read.csv("data.csv", schema=schema)
+```
+
+<Note>
+Explicit schemas for CSV files only support primitive types: `IntegerType`, `FloatType`, `DoubleType`, `BooleanType`, and `StringType`.
+</Note>
+
+---
+
+## Schema Merging
+
+When reading multiple files with different schemas:
+
+<CodeGroup>
+```python CSV files
+# Merge schemas across all CSV files
+# Missing columns are filled with nulls
+df = session.read.csv("data/*.csv", merge_schemas=True)
+```
+
+```python Parquet files
+# Merge schemas across all Parquet files
+df = session.read.parquet("data/*.parquet", merge_schemas=True)
+```
+</CodeGroup>
+
+---
+
+## Working with Schemas
+
+### Get DataFrame Schema
+
+```python
+df = session.create_dataframe({"id": [1, 2, 3]})
+
+# Print schema in readable format
+df.print_schema()
+
+# Get schema object
+schema = df.schema
+column_names = schema.column_names()
+```
+
+### Compare Schemas
+
+```python
+schema1 = fc.Schema([
+    fc.ColumnField("id", fc.IntegerType)
+])
+
+schema2 = fc.Schema([
+    fc.ColumnField("id", fc.IntegerType)
+])
+
+are_equal = (schema1 == schema2)  # True
+```
+
+### Access Column Types
+
+```python
+schema = fc.Schema([
+    fc.ColumnField("id", fc.IntegerType),
+    fc.ColumnField("name", fc.StringType)
+])
+
+# Iterate through columns
+for field in schema.column_fields:
+    print(f"Column: {field.name}, Type: {field.data_type}")
+# Output:
+# Column: id, Type: IntegerType
+# Column: name, Type: StringType
+```
+
+---
+
+## Best Practices
+
+### Use Explicit Schemas When
+
+- Reading CSV files with specific type requirements
+- Creating tables with precise type constraints
+- Ensuring type consistency across multiple data sources
+
+### Use Schema Inference When
+
+- Exploring new datasets
+- Working with Parquet files (schema is preserved)
+- Prototyping and development
+
+### Schema Evolution
+
+```python
+# Add columns to existing data
+df = session.table("my_table")
+
+df_with_new_column = df.select(
+    "*",
+    fc.lit("default_value").alias("new_column")
+)
+
+# Save with overwrite to update schema
+df_with_new_column.write.save_as_table("my_table", mode="overwrite")
+```
+
+## See Also
+
+- [Data Types](/api/types/data-types) - Available data types
+- [Catalog](/api/catalog) - Managing tables with schemas
+- [DataFrameReader](/api/dataframe-reader) - Reading data with schemas

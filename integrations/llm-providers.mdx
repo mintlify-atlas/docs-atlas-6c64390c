@@ -1,0 +1,492 @@
+---
+title: "LLM Provider Integrations"
+description: "Configure and use OpenAI, Anthropic, Google, Cohere, and OpenRouter models with Fenic"
+---
+
+Fenic integrates with multiple LLM providers to power semantic operations like extraction, embedding, classification, and summarization. All providers are configured through the `SemanticConfig` class and support rate limiting, multiple model profiles, and automatic batching.
+
+## Supported Providers
+
+| Provider      | Type             | Models                                      |
+| ------------- | ---------------- | ------------------------------------------- |
+| OpenAI        | LLM + Embeddings | GPT-4, GPT-5, o-series, text-embedding-3-\* |
+| Anthropic     | LLM              | Claude (Haiku/Sonnet/Opus)                  |
+| Google Gemini | LLM + Embeddings | Gemini 2.0/2.5 Flash                        |
+| OpenRouter    | LLM (aggregator) | 200+ models                                 |
+| Cohere        | LLM + Embeddings | embed-v4.0                                  |
+
+## OpenAI
+
+OpenAI provides both language models (GPT-4, GPT-5, o-series) and embedding models.
+
+### Basic Configuration
+
+```python
+import fenic as fc
+from fenic import SemanticConfig, OpenAILanguageModel, OpenAIEmbeddingModel
+
+session = fc.Session.get_or_create(fc.SessionConfig(
+    app_name="my_app",
+    semantic=SemanticConfig(
+        language_models={
+            "gpt": OpenAILanguageModel(
+                model_name="gpt-4.1-nano",
+                rpm=100,
+                tpm=100_000
+            )
+        },
+        embedding_models={
+            "embed": OpenAIEmbeddingModel(
+                model_name="text-embedding-3-small",
+                rpm=100,
+                tpm=100
+            )
+        },
+        default_language_model="gpt",
+        default_embedding_model="embed"
+    )
+))
+```
+
+### Reasoning Models with Profiles
+
+For o-series and GPT-5 models, you can configure different reasoning effort levels:
+
+```python
+config = SemanticConfig(
+    language_models={
+        "o4": OpenAILanguageModel(
+            model_name="o4-mini",
+            rpm=100,
+            tpm=100_000,
+            profiles={
+                "fast": OpenAILanguageModel.Profile(reasoning_effort="low"),
+                "thorough": OpenAILanguageModel.Profile(reasoning_effort="high"),
+            },
+            default_profile="fast"
+        )
+    }
+)
+```
+
+Use a specific profile in semantic operations:
+
+```python
+# Use default "fast" profile
+df.semantic.map(
+    instruction="Analyze {text}",
+    model_alias="o4"
+)
+
+# Use "thorough" profile
+df.semantic.map(
+    instruction="Analyze {text}",
+    model_alias=fc.ModelAlias(name="o4", profile="thorough")
+)
+```
+
+### Environment Variables
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+## Anthropic
+
+Anthropic provides Claude models with separate rate limits for input and output tokens.
+
+### Basic Configuration
+
+```python
+from fenic import AnthropicLanguageModel
+
+config = SemanticConfig(
+    language_models={
+        "claude": AnthropicLanguageModel(
+            model_name="claude-3-5-haiku-latest",
+            rpm=100,
+            input_tpm=100_000,
+            output_tpm=10_000
+        )
+    }
+)
+```
+
+### Extended Thinking Models
+
+Claude Opus 4.0 supports extended thinking with configurable token budgets:
+
+```python
+config = SemanticConfig(
+    language_models={
+        "claude": AnthropicLanguageModel(
+            model_name="claude-opus-4-0",
+            rpm=100,
+            input_tpm=100_000,
+            output_tpm=10_000,
+            profiles={
+                "thinking_disabled": AnthropicLanguageModel.Profile(),
+                "fast": AnthropicLanguageModel.Profile(thinking_token_budget=1024),
+                "thorough": AnthropicLanguageModel.Profile(thinking_token_budget=4096)
+            },
+            default_profile="fast"
+        )
+    }
+)
+```
+
+<Note>
+The minimum thinking token budget supported by Anthropic is 1024 tokens. When thinking is enabled, temperature cannot be customized.
+</Note>
+
+### Environment Variables
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Google Gemini
+
+Google provides Gemini models through both Developer AI Studio and Vertex AI, with support for embeddings and reasoning.
+
+### Google Developer AI Studio
+
+Access Gemini models using a GOOGLE_API_KEY:
+
+```python
+from fenic import GoogleDeveloperLanguageModel, GoogleDeveloperEmbeddingModel
+
+config = SemanticConfig(
+    language_models={
+        "gemini": GoogleDeveloperLanguageModel(
+            model_name="gemini-2.0-flash",
+            rpm=100,
+            tpm=100_000
+        )
+    },
+    embedding_models={
+        "gemini_embed": GoogleDeveloperEmbeddingModel(
+            model_name="gemini-embedding-001",
+            rpm=100,
+            tpm=100_000
+        )
+    }
+)
+```
+
+### Google Vertex AI
+
+For production workloads with Google Cloud credentials:
+
+```python
+from fenic import GoogleVertexLanguageModel, GoogleVertexEmbeddingModel
+
+config = SemanticConfig(
+    language_models={
+        "gemini": GoogleVertexLanguageModel(
+            model_name="gemini-2.0-flash",
+            rpm=100,
+            tpm=100_000
+        )
+    },
+    embedding_models={
+        "gemini_embed": GoogleVertexEmbeddingModel(
+            model_name="gemini-embedding-001",
+            rpm=100,
+            tpm=100_000
+        )
+    }
+)
+```
+
+### Reasoning Models (Gemini 2.5+)
+
+<Tabs>
+  <Tab title="Token Budget (Gemini 2.5)">
+    ```python
+    config = SemanticConfig(
+        language_models={
+            "gemini": GoogleDeveloperLanguageModel(
+                model_name="gemini-2.5-flash",
+                rpm=100,
+                tpm=100_000,
+                profiles={
+                    "thinking_disabled": GoogleDeveloperLanguageModel.Profile(),
+                    "fast": GoogleDeveloperLanguageModel.Profile(thinking_token_budget=1024),
+                    "thorough": GoogleDeveloperLanguageModel.Profile(thinking_token_budget=8192),
+                },
+                default_profile="fast"
+            )
+        }
+    )
+    ```
+  </Tab>
+  <Tab title="Thinking Level (Gemini 3+)">
+    ```python
+    config = SemanticConfig(
+        language_models={
+            "gemini": GoogleDeveloperLanguageModel(
+                model_name="gemini-3.0-flash",
+                rpm=100,
+                tpm=100_000,
+                profiles={
+                    "minimal": GoogleDeveloperLanguageModel.Profile(thinking_level="minimal"),
+                    "low": GoogleDeveloperLanguageModel.Profile(thinking_level="low"),
+                    "high": GoogleDeveloperLanguageModel.Profile(thinking_level="high"),
+                },
+                default_profile="low"
+            )
+        }
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+Gemini models treat thinking token budgets as suggestions, not hard limits. The model may generate more thinking tokens than specified.
+</Note>
+
+### Environment Variables
+
+```bash
+# For Google Developer AI Studio
+export GOOGLE_API_KEY=...
+
+# For Vertex AI (uses Google Cloud credentials)
+# Configure via gcloud CLI or service account
+```
+
+## OpenRouter
+
+OpenRouter provides access to 200+ models from multiple providers with intelligent routing.
+
+### Basic Configuration
+
+```python
+from fenic import OpenRouterLanguageModel
+
+config = SemanticConfig(
+    language_models={
+        "router": OpenRouterLanguageModel(
+            model_name="anthropic/claude-3-5-sonnet",
+            profiles={
+                "default": OpenRouterLanguageModel.Profile(
+                    provider=OpenRouterLanguageModel.Provider(
+                        sort="price"  # Route to cheapest provider
+                    )
+                )
+            }
+        )
+    }
+)
+```
+
+### Provider Routing
+
+Control which providers handle your requests:
+
+<CodeGroup>
+```python Price-Based Routing
+config = SemanticConfig(
+    language_models={
+        "router": OpenRouterLanguageModel(
+            model_name="openai/gpt-oss-20b",
+            profiles={
+                "default": OpenRouterLanguageModel.Profile(
+                    provider=OpenRouterLanguageModel.Provider(
+                        sort="price"  # Routes to cheapest available
+                    )
+                )
+            }
+        )
+    }
+)
+```
+
+```python Provider Filtering
+config = SemanticConfig(
+    language_models={
+        "router": OpenRouterLanguageModel(
+            model_name="anthropic/claude-sonnet-4-0-latest",
+            profiles={
+                "default": OpenRouterLanguageModel.Profile(
+                    provider=OpenRouterLanguageModel.Provider(
+                        only=["Anthropic"],  # Only use Anthropic, not AWS/GCP
+                        data_collection="deny"  # Exclude data-collecting providers
+                    )
+                )
+            }
+        )
+    }
+)
+```
+
+```python Advanced Routing
+config = SemanticConfig(
+    language_models={
+        "router": OpenRouterLanguageModel(
+            model_name="qwen/qwen3-next-80b-a3b-instruct",
+            profiles={
+                "default": OpenRouterLanguageModel.Profile(
+                    provider=OpenRouterLanguageModel.Provider(
+                        sort="throughput",
+                        data_collection="deny",
+                        quantizations=["bf16"],  # Only bf16, not fp8
+                        max_prompt_price=5.0,  # Max $5 per 1M tokens
+                    )
+                )
+            }
+        )
+    }
+)
+```
+</CodeGroup>
+
+### Environment Variables
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+## Cohere
+
+Cohere provides embedding models with task-specific optimization.
+
+### Configuration
+
+```python
+from fenic import CohereEmbeddingModel
+
+config = SemanticConfig(
+    embedding_models={
+        "cohere": CohereEmbeddingModel(
+            model_name="embed-v4.0",
+            rpm=100,
+            tpm=50_000,
+            profiles={
+                "search": CohereEmbeddingModel.Profile(
+                    output_dimensionality=1536,
+                    input_type="search_document"
+                ),
+                "classify": CohereEmbeddingModel.Profile(
+                    output_dimensionality=1024,
+                    input_type="classification"
+                ),
+            },
+            default_profile="search"
+        )
+    }
+)
+```
+
+### Environment Variables
+
+```bash
+export COHERE_API_KEY=...
+```
+
+## Multi-Provider Configuration
+
+Mix and match providers for different use cases:
+
+```python
+config = SemanticConfig(
+    language_models={
+        "gpt4": OpenAILanguageModel(
+            model_name="gpt-4.1-nano",
+            rpm=100,
+            tpm=100_000
+        ),
+        "claude": AnthropicLanguageModel(
+            model_name="claude-3-5-haiku-latest",
+            rpm=100,
+            input_tpm=100_000,
+            output_tpm=10_000
+        ),
+        "gemini": GoogleDeveloperLanguageModel(
+            model_name="gemini-2.0-flash",
+            rpm=100,
+            tpm=100_000
+        ),
+    },
+    embedding_models={
+        "openai": OpenAIEmbeddingModel(
+            model_name="text-embedding-3-small",
+            rpm=100,
+            tpm=100_000
+        )
+    },
+    default_language_model="gpt4",
+    default_embedding_model="openai"
+)
+```
+
+Use specific models in operations:
+
+```python
+# Use GPT-4 for extraction
+df.semantic.extract(
+    column="text",
+    schema=MySchema,
+    model_alias="gpt4"
+)
+
+# Use Claude for summarization
+df.semantic.map(
+    instruction="Summarize: {text}",
+    model_alias="claude"
+)
+
+# Use Gemini for classification
+df.semantic.classify(
+    column="text",
+    categories=["positive", "negative", "neutral"],
+    model_alias="gemini"
+)
+```
+
+## Rate Limiting
+
+All providers support automatic rate limiting through `rpm` (requests per minute) and `tpm` (tokens per minute) parameters:
+
+```python
+OpenAILanguageModel(
+    model_name="gpt-4.1-nano",
+    rpm=1000,      # Max 1000 requests per minute
+    tpm=1_000_000  # Max 1M tokens per minute
+)
+```
+
+Fenic automatically batches requests and respects these limits to prevent API throttling.
+
+<Warning>
+Set rate limits according to your API tier. Exceeding limits will cause requests to be queued or fail.
+</Warning>
+
+## Cost Tracking
+
+Track token usage and costs across all operations:
+
+```python
+df = session.create_dataframe([{"text": "sample"}])
+result = df.semantic.map(
+    instruction="Summarize: {text}"
+)
+
+metrics = result.write.save_as_table("output", mode="overwrite")
+
+print(f"Total cost: ${metrics.total_lm_metrics.cost:.4f}")
+print(f"Input tokens: {metrics.total_lm_metrics.num_uncached_input_tokens}")
+print(f"Output tokens: {metrics.total_lm_metrics.num_output_tokens}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Semantic Operations" icon="wand-magic-sparkles" href="/api/functions/semantic">
+    Learn about extraction, embedding, and classification operations
+  </Card>
+  <Card title="MCP Server" icon="server" href="/integrations/mcp-server">
+    Expose Fenic context to agent frameworks via MCP
+  </Card>
+</CardGroup>

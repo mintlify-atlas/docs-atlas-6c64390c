@@ -1,0 +1,409 @@
+---
+title: 'Podcast Summarization'
+description: 'Process long-form podcast transcripts with chunked summarization and role-specific analysis'
+icon: 'podcast'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/podcast_summarization/podcast_summarization.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Comprehensive podcast transcript summarization using Fenic's semantic operations and unstructured data processing capabilities.
+
+## Overview
+
+This pipeline processes a Lex Fridman podcast episode featuring the Cursor team, showcasing:
+
+- **Extractive & Abstractive Summarization**: Multiple summarization techniques
+- **Recursive Summarization**: Chunked processing for long-form content
+- **Role-Specific Analysis**: Tailored summaries for host vs guests
+- **Unstructured Data Processing**: JSON transcript parsing and analysis
+
+## Episode Data
+
+- **Episode**: #447 Cursor Team: Future of Programming with AI
+- **Duration**: 2:37:38
+- **Participants**: Lex Fridman (host), Michael Truell, Arvid Lunnemark, Aman Sanger, Sualeh Asif
+- **Format**: JSON transcript with word-level timing and speaker diarization
+
+## Pipeline Architecture
+
+<Steps>
+  <Step title="Data Loading & Processing">
+    Load JSON files as raw text strings and parse metadata using JSON operations.
+  </Step>
+  
+  <Step title="Speaker Identification">
+    Filter out noise speakers (ads, intro music) and map anonymous IDs to participant names.
+  </Step>
+  
+  <Step title="Multi-Level Summarization">
+    Generate full episode summary, host-specific analysis, and individual guest summaries.
+  </Step>
+</Steps>
+
+## Implementation
+
+### Session Configuration
+
+```python
+import fenic as fc
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from pathlib import Path
+
+config = fc.SessionConfig(
+    app_name="podcast_summarization",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "mini": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000,
+            )
+        }
+    ),
+)
+
+session = fc.Session.get_or_create(config)
+```
+
+### Data Loading and JSON Processing
+
+```python
+# Read JSON files as text
+data_dir = Path(__file__).parent / "data"
+
+with open(data_dir / "lex_ai_cursor_team_meta.json", "r") as f:
+    meta_text = f.read()
+
+with open(data_dir / "lex_ai_cursor_team.json", "r") as f:
+    transcript_text = f.read()
+
+# Create DataFrames with raw text content
+meta_df = session.create_dataframe([{
+    "file_name": "lex_ai_cursor_team_meta.json",
+    "content": meta_text,
+    "content_type": "metadata"
+}])
+
+transcript_df = session.create_dataframe([{
+    "file_name": "lex_ai_cursor_team.json",
+    "content": transcript_text,
+    "content_type": "transcript"
+}])
+```
+
+### Process Metadata
+
+```python
+# Cast content string to JSON type
+meta_json_df = meta_df.select(
+    fc.col("file_name"),
+    fc.col("content").cast(fc.JsonType).alias("json_data")
+)
+
+# Define metadata struct type
+metadata_struct = fc.StructType([
+    fc.StructField("title", fc.StringType),
+    fc.StructField("published", fc.StringType),
+    fc.StructField("description", fc.StringType),
+    fc.StructField("duration", fc.StringType),
+    fc.StructField("audio_url", fc.StringType),
+    fc.StructField("link", fc.StringType)
+])
+
+# Cast entire JSON blob to struct
+meta_struct_df = meta_json_df.select(
+    fc.col("file_name"),
+    fc.col("json_data").cast(metadata_struct).alias("metadata")
+)
+
+# Extract fields from struct
+meta_extracted_df = meta_struct_df.select(
+    fc.col("metadata").title.alias("title"),
+    fc.col("metadata").published.alias("published"),
+    fc.col("metadata").description.alias("description"),
+    fc.col("metadata").duration.alias("duration"),
+)
+```
+
+### Extract Word-Level Data
+
+```python
+# Cast transcript to JSON and extract words
+transcript_json_df = transcript_df.select(
+    fc.col("content").cast(fc.JsonType).alias("json_data")
+)
+
+# Extract all words from all segments using JQ
+words_raw_df = transcript_json_df.select(
+    fc.json.jq(
+        fc.col("json_data"),
+        '.segments[] | .words[]'
+    ).alias("word_data")
+).explode("word_data")
+
+# Extract and cast individual word fields
+words_df = words_raw_df.select(
+    fc.json.jq(fc.col("word_data"), '.word').get_item(0).cast(fc.StringType).alias("word_text"),
+    fc.json.jq(fc.col("word_data"), '.speaker').get_item(0).cast(fc.StringType).alias("speaker"),
+    fc.json.jq(fc.col("word_data"), '.start').get_item(0).cast(fc.FloatType).alias("start_time"),
+    fc.json.jq(fc.col("word_data"), '.end').get_item(0).cast(fc.FloatType).alias("end_time"),
+    fc.json.jq(fc.col("word_data"), '.score').get_item(0).cast(fc.FloatType).alias("confidence_score")
+).select(
+    "*",
+    (fc.col("end_time") - fc.col("start_time")).alias("duration")
+)
+```
+
+<Info>
+Word-level extraction enables granular analysis of speaking patterns, timing, and confidence scores.
+</Info>
+
+### Extract Segment-Level Data
+
+```python
+# Extract segments with text, timing, and aggregated metrics
+segments_raw_df = transcript_json_df.select(
+    fc.json.jq(fc.col("json_data"), '.segments[]').alias("segment_data")
+).explode("segment_data")
+
+segments_df = segments_raw_df.select(
+    fc.json.jq(fc.col("segment_data"), '.text').get_item(0).cast(fc.StringType).alias("segment_text"),
+    fc.json.jq(fc.col("segment_data"), '.start').get_item(0).cast(fc.FloatType).alias("start_time"),
+    fc.json.jq(fc.col("segment_data"), '.end').get_item(0).cast(fc.FloatType).alias("end_time"),
+    fc.json.jq(fc.col("segment_data"), '.speaker').get_item(0).cast(fc.StringType).alias("speaker"),
+    fc.json.jq(fc.col("segment_data"), '.words | length').get_item(0).cast(fc.IntegerType).alias("word_count"),
+    fc.json.jq(fc.col("segment_data"), '[.words[].score] | add / length').get_item(0).cast(fc.FloatType).alias("average_confidence")
+).select(
+    "*",
+    (fc.col("end_time") - fc.col("start_time")).alias("duration")
+)
+```
+
+### Speaker Identification
+
+```python
+# Aggregate all speech by speaker
+speaker_aggregated_df = segments_df.group_by("speaker").agg(
+    fc.collect_list("segment_text").alias("speech_segments"),
+    fc.min("start_time").alias("first_speaking_time"),
+    fc.max("end_time").alias("last_speaking_time"),
+    fc.count("*").alias("segment_count"),
+    fc.sum("duration").alias("total_speaking_time")
+).select(
+    "*",
+    fc.text.array_join(fc.col("speech_segments"), " ").alias("full_speech")
+)
+
+# Filter out speakers with minimal speaking time (< 60 seconds)
+speaker_filtered_df = speaker_aggregated_df.filter(
+    fc.col("total_speaking_time") >= 60.0
+)
+
+# Map speakers to actual names
+speaker_mapping_df = speaker_filtered_df.select(
+    fc.col("speaker"),
+    fc.when(fc.col("speaker") == "SPEAKER_05", fc.lit("Lex Fridman"))
+    .when(fc.col("speaker") == "SPEAKER_02", fc.lit("Michael Truell"))
+    .when(fc.col("speaker") == "SPEAKER_03", fc.lit("Arvid Lunnemark"))
+    .when(fc.col("speaker") == "SPEAKER_01", fc.lit("Aman Sanger"))
+    .when(fc.col("speaker") == "SPEAKER_04", fc.lit("Sualeh Asif"))
+    .otherwise(fc.lit("Unknown")).alias("identified_name"),
+    fc.when(fc.col("speaker") == "SPEAKER_05", fc.lit("HOST"))
+    .otherwise(fc.lit("GUEST")).alias("role")
+).sort("first_speaking_time")
+```
+
+### Chunked Recursive Summarization
+
+```python
+# Combine all segments into full transcript
+full_transcript_df = segments_df.agg(
+    fc.collect_list("segment_text").alias("segment_list")
+).select(
+    "*",
+    fc.text.array_join(fc.col("segment_list"), " ").alias("full_transcript_text")
+)
+
+# Chunk the transcript into manageable pieces
+chunked_df = full_transcript_df.select(
+    fc.text.recursive_word_chunk(
+        fc.col("full_transcript_text"),
+        chunk_size=1500,
+        chunk_overlap_percentage=10
+    ).alias("chunks")
+).explode("chunks").select(
+    fc.col("chunks").alias("chunk_text")
+)
+
+# Summarize each chunk independently
+chunk_summaries_df = chunked_df.select(
+    "*",
+    fc.semantic.map(
+        (
+            "Summarize this portion of a Lex Fridman podcast with the Cursor team. "
+            "Focus on key technical insights, product decisions, and important discussion points. "
+            "Keep the summary concise but capture the main ideas. Chunk: {{chunk}}"
+        ),
+        chunk=fc.col("chunk_text")
+    ).alias("chunk_summary")
+)
+
+# Combine chunk summaries for recursive summarization
+combined_summaries_df = chunk_summaries_df.agg(
+    fc.collect_list("chunk_summary").alias("summary_list")
+).select(
+    "*",
+    fc.text.array_join(fc.col("summary_list"), " ").alias("combined_summaries")
+)
+
+# Create final summary from combined summaries
+final_summary_df = combined_summaries_df.select(
+    "*",
+    fc.semantic.map(
+        (
+            "Create a comprehensive summary of this Lex Fridman podcast episode "
+            "with the Cursor team. Synthesize the key themes, technical insights, "
+            "product vision, and important discussion points. Combined summaries: {{summaries}}"
+        ),
+        summaries=fc.col("combined_summaries")
+    ).alias("final_summary")
+)
+
+print("Final Podcast Summary:")
+final_summary_df.select(fc.col("final_summary")).show()
+```
+
+<Note>
+Chunked recursive summarization handles long transcripts by first summarizing chunks, then combining those summaries into a cohesive final summary.
+</Note>
+
+### Host-Specific Summarization
+
+```python
+# Filter segments for the host only
+host_segments_df = segments_df.filter(fc.col("speaker") == "SPEAKER_05")
+
+# Aggregate all host speech
+host_speech_df = host_segments_df.agg(
+    fc.collect_list("segment_text").alias("host_segments_list")
+).select(
+    "*",
+    fc.text.array_join(fc.col("host_segments_list"), " ").alias("host_full_speech")
+)
+
+# Create role-specific host summary
+host_summary_df = host_speech_df.select(
+    "*",
+    fc.semantic.map(
+        (
+            "Analyze Lex Fridman's role as host in this podcast. Focus on: "
+            "1) His most thought-provoking and insightful questions, "
+            "2) Personal insights and expertise he shared, "
+            "3) How he guided the conversation toward deeper topics, "
+            "4) Broader connections he made between ideas. "
+            "Ignore basic facilitation. Host speech: {{speech}}"
+        ),
+        speech=fc.col("host_full_speech")
+    ).alias("host_analysis")
+)
+
+print("Host Analysis - Lex Fridman's Contributions:")
+host_summary_df.select(fc.col("host_analysis")).show()
+```
+
+### Individual Guest Summaries
+
+```python
+# Filter guest segments and aggregate speech
+guest_segments_df = segments_df.filter(
+    (fc.col("speaker") != "SPEAKER_05") & (fc.col("speaker") != "null")
+)
+
+guest_speech_df = guest_segments_df.group_by("speaker").agg(
+    fc.collect_list("segment_text").alias("speech_segments"),
+    fc.count("*").alias("segment_count"),
+    fc.sum("duration").alias("total_speaking_time")
+).select(
+    "*",
+    fc.text.array_join(fc.col("speech_segments"), " ").alias("full_speech")
+)
+
+# Add guest names
+guest_with_names_df = guest_speech_df.select(
+    "*",
+    fc.when(fc.col("speaker") == "SPEAKER_02", fc.lit("Michael Truell"))
+    .when(fc.col("speaker") == "SPEAKER_03", fc.lit("Arvid Lunnemark"))
+    .when(fc.col("speaker") == "SPEAKER_01", fc.lit("Aman Sanger"))
+    .when(fc.col("speaker") == "SPEAKER_04", fc.lit("Sualeh Asif"))
+    .alias("guest_name")
+).filter(fc.col("segment_count") > 10)
+
+# Create guest-specific summaries
+guest_summaries_df = guest_with_names_df.select(
+    "*",
+    fc.semantic.map(
+        (
+            "Analyze this guest's contributions to the Lex Fridman podcast about Cursor. "
+            "Focus on their technical expertise, product vision, unique experiences, "
+            "and perspective on AI-assisted programming. "
+            "Guest: {{guest}}. Speech: {{speech}}"
+        ),
+        guest=fc.col("guest_name"),
+        speech=fc.col("full_speech")
+    ).alias("guest_analysis")
+)
+
+print("Individual Guest Analyses:")
+guest_summaries_df.select(fc.col("guest_name"), fc.col("guest_analysis")).show()
+```
+
+## Key Features Demonstrated
+
+<CardGroup cols={2}>
+  <Card title="Unstructured Data Processing" icon="file-code">
+    JSON type casting, extraction, and processing of complex nested structures.
+  </Card>
+  <Card title="Text Processing & Aggregation" icon="text">
+    Proper aggregation with array operations and text joining.
+  </Card>
+  <Card title="Semantic Operations" icon="brain">
+    Semantic mapping with placeholders for role-specific analysis.
+  </Card>
+  <Card title="Advanced Filtering" icon="filter">
+    Complex conditional mapping and speaker identification.
+  </Card>
+</CardGroup>
+
+## Output
+
+The pipeline generates:
+
+1. **Full Episode Summary**: Comprehensive overview of key themes and insights
+2. **Host Analysis**: Lex Fridman's interviewing mastery and intellectual contributions
+3. **Guest Summaries**: Individual analyses for each Cursor team member
+4. **Speaker Statistics**: Speaking time, segment counts, and participation metrics
+
+## Running the Example
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="your-api-key"
+
+# Run the pipeline
+python podcast_summarization.py
+```
+
+## Learning Outcomes
+
+This example teaches:
+
+- Working with real-world unstructured data (JSON transcripts)
+- Combining multiple summarization approaches
+- Handling long-form content with chunking strategies
+- Creating role-specific semantic operations
+- Building robust data pipelines with filtering and validation

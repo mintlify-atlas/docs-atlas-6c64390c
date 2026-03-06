@@ -1,0 +1,517 @@
+---
+title: Built-in Functions
+description: Core functions for aggregation, conditional logic, and data structures
+---
+
+Built-in functions provide essential operations for aggregation, conditionals, and working with structured data. All functions are available directly via `fc.*`.
+
+## Aggregation Functions
+
+### sum
+
+Aggregate function: returns the sum of all values in the specified column.
+
+```python
+fc.sum(column: ColumnOrName) -> Column
+```
+
+---
+
+### sum_distinct
+
+Aggregate function: returns the sum of distinct numeric values in the specified column.
+
+```python
+fc.sum_distinct(column: ColumnOrName) -> Column
+```
+
+### Example
+
+```python
+df.group_by(fc.col("k")).agg(
+    fc.sum_distinct(fc.col("v")).alias("sum_distinct_v")
+)
+```
+
+---
+
+### avg / mean
+
+Aggregate function: returns the average (mean) of all values in the specified column.
+
+```python
+fc.avg(column: ColumnOrName) -> Column
+fc.mean(column: ColumnOrName) -> Column  # Alias for avg
+```
+
+---
+
+### min
+
+Aggregate function: returns the minimum value in the specified column.
+
+```python
+fc.min(column: ColumnOrName) -> Column
+```
+
+---
+
+### max
+
+Aggregate function: returns the maximum value in the specified column.
+
+```python
+fc.max(column: ColumnOrName) -> Column
+```
+
+---
+
+### count
+
+Aggregate function: returns the count of non-null values in the specified column.
+
+```python
+fc.count(column: ColumnOrName) -> Column
+```
+
+### Example
+
+```python
+fc.count("*")  # Count all rows
+fc.count("column_name")  # Count non-null values
+```
+
+---
+
+### count_distinct
+
+Aggregate function: returns the number of distinct non-null rows across one or more columns.
+
+```python
+fc.count_distinct(*cols: ColumnOrName) -> Column
+```
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  One or more columns or column names to include in the distinct count.
+</ParamField>
+
+<Note>
+Any row where one or more inputs is null is ignored.
+</Note>
+
+### Example
+
+```python
+df.group_by(fc.col("k")).agg(
+    fc.count_distinct(fc.col("v")).alias("num_unique_v")
+)
+```
+
+---
+
+### approx_count_distinct
+
+Aggregate function: returns an approximate count (HyperLogLog++) of distinct non-null values.
+
+```python
+fc.approx_count_distinct(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name to approximately count distinct values in. Cannot be a StructType column.
+</ParamField>
+
+---
+
+### collect_list / array_agg
+
+Aggregate function: collects all values from the specified column into a list.
+
+```python
+fc.collect_list(column: ColumnOrName) -> Column
+fc.array_agg(column: ColumnOrName) -> Column  # Alias
+```
+
+---
+
+### first
+
+Aggregate function: returns the first non-null value in the specified column.
+
+```python
+fc.first(column: ColumnOrName) -> Column
+```
+
+---
+
+### stddev
+
+Aggregate function: returns the sample standard deviation of the specified column.
+
+```python
+fc.stddev(column: ColumnOrName) -> Column
+```
+
+---
+
+## Conditional Functions
+
+### when
+
+Evaluates a conditional expression (like if-then).
+
+```python
+fc.when(condition: Column, value: Column) -> Column
+```
+
+<ParamField path="condition" type="Column" required>
+  Boolean expression to test.
+</ParamField>
+
+<ParamField path="value" type="Column" required>
+  Value to return when condition is True.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A when expression that can be chained with more conditions using `.when()` or finished with `.otherwise()`.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Simple if-then
+df.select(fc.when(fc.col("age") >= 18, fc.lit("adult")))
+```
+
+```python If-then-else
+df.select(
+    fc.when(fc.col("age") >= 18, fc.lit("adult"))
+      .otherwise(fc.lit("minor"))
+)
+```
+
+```python Multiple conditions
+df.select(
+    fc.when(fc.col("score") >= 90, "A")
+      .when(fc.col("score") >= 80, "B")
+      .when(fc.col("score") >= 70, "C")
+      .otherwise("F")
+)
+```
+</CodeGroup>
+
+---
+
+### coalesce
+
+Returns the first non-null value from the given columns for each row.
+
+```python
+fc.coalesce(*cols: ColumnOrName) -> Column
+```
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  Column expressions or column names to evaluate.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column expression containing the first non-null value from the input columns.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.coalesce("col1", "col2", "col3"))
+```
+
+---
+
+### greatest
+
+Returns the greatest value from the given columns for each row.
+
+```python
+fc.greatest(*cols: ColumnOrName) -> Column
+```
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  Column expressions or column names to evaluate (minimum 2).
+</ParamField>
+
+<Note>
+All arguments must be of the same primitive type.
+</Note>
+
+### Example
+
+```python
+df.select(fc.greatest("col1", "col2", "col3"))
+```
+
+---
+
+### least
+
+Returns the least value from the given columns for each row.
+
+```python
+fc.least(*cols: ColumnOrName) -> Column
+```
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  Column expressions or column names to evaluate (minimum 2).
+</ParamField>
+
+<Note>
+All arguments must be of the same primitive type.
+</Note>
+
+### Example
+
+```python
+df.select(fc.least("col1", "col2", "col3"))
+```
+
+---
+
+## Data Structure Functions
+
+### struct
+
+Creates a new struct column from multiple input columns.
+
+```python
+fc.struct(*args: Union[ColumnOrName, List[ColumnOrName], Tuple[ColumnOrName, ...]]) -> Column
+```
+
+<ParamField path="*args" type="Union[ColumnOrName, List, Tuple]" required>
+  Columns or column names to combine into a struct. Can be individual arguments, lists, or tuples.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column expression representing a struct containing the input columns.
+</ResponseField>
+
+---
+
+### array
+
+Creates a new array column from multiple input columns.
+
+```python
+fc.array(*args: Union[ColumnOrName, List[ColumnOrName], Tuple[ColumnOrName, ...]]) -> Column
+```
+
+<ParamField path="*args" type="Union[ColumnOrName, List, Tuple]" required>
+  Columns or column names to combine into an array. Can be individual arguments, lists, or tuples.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column expression representing an array containing values from the input columns.
+</ResponseField>
+
+---
+
+### flatten
+
+Flattens an array of arrays into a single array (one level deep).
+
+```python
+fc.flatten(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays of arrays.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with flattened arrays (one level deep).
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.flatten("nested"))
+# Input: [[1, 2], [3, 4]]
+# Output: [1, 2, 3, 4]
+```
+
+---
+
+## User-Defined Functions
+
+### udf
+
+A decorator or function for creating user-defined functions (UDFs) that can be applied to DataFrame rows.
+
+```python
+fc.udf(f: Optional[Callable] = None, *, return_type: DataType)
+```
+
+<ParamField path="f" type="Optional[Callable]">
+  Python function to convert to UDF.
+</ParamField>
+
+<ParamField path="return_type" type="DataType" required>
+  Expected return type of the UDF.
+</ParamField>
+
+<Warning>
+UDFs cannot be serialized and are not supported in cloud execution. For cloud compatibility, use built-in fenic functions instead.
+</Warning>
+
+### Examples
+
+<CodeGroup>
+```python UDF with primitive types
+@fc.udf(return_type=IntegerType)
+def add_one(x: int):
+    return x + 1
+
+# Or
+add_one = fc.udf(lambda x: x + 1, return_type=IntegerType)
+```
+
+```python UDF with nested types
+@fc.udf(return_type=StructType([
+    StructField("value1", IntegerType),
+    StructField("value2", IntegerType)
+]))
+def example_udf(x: dict[str, int], y: list[int]):
+    return {
+        "value1": x["value1"] + x["value2"] + y[0],
+        "value2": x["value1"] + x["value2"] + y[1],
+    }
+```
+</CodeGroup>
+
+---
+
+### async_udf
+
+A decorator for creating async user-defined functions (UDFs) with configurable concurrency and retries.
+
+```python
+fc.async_udf(
+    f: Optional[Callable[..., Awaitable[Any]]] = None,
+    *,
+    return_type: DataType,
+    max_concurrency: int = 10,
+    timeout_seconds: float = 30,
+    num_retries: int = 0,
+)
+```
+
+<ParamField path="f" type="Optional[Callable]">
+  Async function to convert to UDF.
+</ParamField>
+
+<ParamField path="return_type" type="DataType" required>
+  Expected return type of the UDF.
+</ParamField>
+
+<ParamField path="max_concurrency" type="int" default="10">
+  Maximum number of concurrent executions.
+</ParamField>
+
+<ParamField path="timeout_seconds" type="float" default="30">
+  Per-item timeout in seconds.
+</ParamField>
+
+<ParamField path="num_retries" type="int" default="0">
+  Number of retries for failed items.
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+```python Basic async UDF
+@fc.async_udf(return_type=IntegerType)
+async def slow_add(x: int, y: int) -> int:
+    await asyncio.sleep(1)
+    return x + y
+
+df = df.select(slow_add(fc.col("x"), fc.col("y")).alias("slow_sum"))
+```
+
+```python API call with custom settings
+@fc.async_udf(
+    return_type=StructType([
+        StructField("status", IntegerType),
+        StructField("data", StringType)
+    ]),
+    max_concurrency=20,
+    timeout_seconds=5,
+    num_retries=2
+)
+async def fetch_data(id: str) -> dict:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://api.example.com/{id}") as resp:
+            return {
+                "status": resp.status,
+                "data": await resp.text()
+            }
+```
+</CodeGroup>
+
+---
+
+## Sorting Functions
+
+### asc
+
+Mark this column for ascending sort order with nulls first.
+
+```python
+fc.asc(column: ColumnOrName) -> Column
+```
+
+---
+
+### asc_nulls_first
+
+Alias for `asc()`.
+
+```python
+fc.asc_nulls_first(column: ColumnOrName) -> Column
+```
+
+---
+
+### asc_nulls_last
+
+Mark this column for ascending sort order with nulls last.
+
+```python
+fc.asc_nulls_last(column: ColumnOrName) -> Column
+```
+
+---
+
+### desc
+
+Mark this column for descending sort order with nulls first.
+
+```python
+fc.desc(column: ColumnOrName) -> Column
+```
+
+---
+
+### desc_nulls_first
+
+Alias for `desc()`.
+
+```python
+fc.desc_nulls_first(column: ColumnOrName) -> Column
+```
+
+---
+
+### desc_nulls_last
+
+Mark this column for descending sort order with nulls last.
+
+```python
+fc.desc_nulls_last(column: ColumnOrName) -> Column
+```

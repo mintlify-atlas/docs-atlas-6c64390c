@@ -1,0 +1,267 @@
+---
+title: 'Hello World: Error Log Analyzer'
+description: 'A simple error log analyzer using Fenic semantic extraction to parse and analyze application errors without regex patterns'
+icon: 'rocket'
+---
+
+<Info>
+  Try this example in Google Colab:
+  
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/hello_world/hello_world.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</Info>
+
+## Overview
+
+This example demonstrates automated error log analysis through natural language processing. The analyzer processes various error types and provides:
+
+- Root cause identification
+- Automated fix suggestions
+- Severity classification (low/medium/high/critical)
+- Pattern extraction
+
+All without using regex patterns or manual parsing rules.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Fenic">
+    ```bash
+    pip install fenic
+    ```
+  </Step>
+  
+  <Step title="Configure OpenAI API Key">
+    ```bash
+    export OPENAI_API_KEY="your-api-key-here"
+    ```
+  </Step>
+</Steps>
+
+## Implementation
+
+### Define Extraction Schemas
+
+First, create Pydantic models to define what information you want to extract:
+
+```python
+from pydantic import BaseModel, Field
+import fenic as fc
+
+class ErrorAnalysis(BaseModel):
+    root_cause: str = Field(description="The root cause of this error")
+    fix_recommendation: str = Field(description="How to fix this error")
+
+class ErrorPattern(BaseModel):
+    error_type: str = Field(description="Type of error (e.g., NullPointer, Timeout, ConnectionRefused)")
+    component: str = Field(description="Affected component or system")
+```
+
+### Configure Session
+
+Set up a Fenic session with semantic capabilities:
+
+```python
+config = fc.SessionConfig(
+    app_name="hello_debug",
+    semantic=fc.SemanticConfig(
+        language_models= {
+            "mini": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000
+            )
+        }
+    )
+)
+
+session = fc.Session.get_or_create(config)
+```
+
+### Prepare Error Logs
+
+Create a DataFrame from your error logs:
+
+```python
+error_logs = [
+    {
+        "timestamp": "2024-01-20 14:23:45",
+        "service": "api-gateway",
+        "error_log": """
+ERROR: NullPointerException in UserService.getProfile()
+    at com.app.UserService.getProfile(UserService.java:45)
+    at com.app.ApiController.handleRequest(ApiController.java:123)
+
+User ID: 12345 was not found in cache, attempted DB lookup returned null
+        """
+    },
+    # ... more error logs
+]
+
+df = session.create_dataframe(error_logs)
+```
+
+### Apply Semantic Operations
+
+Use semantic operations to analyze and classify errors:
+
+```python
+df_analyzed = df.select(
+    "timestamp",
+    "service",
+    # Classify error severity
+    fc.semantic.classify("error_log", ["low", "medium", "high", "critical"]).alias("severity"),
+    # Extract debugging information
+    fc.semantic.extract("error_log", ErrorAnalysis).alias("analysis")
+)
+
+# Show analysis with extracted fields
+df_analysis_readable = df_analyzed.select(
+    "timestamp",
+    "service",
+    "severity",
+    df_analyzed.analysis.root_cause.alias("root_cause"),
+    df_analyzed.analysis.fix_recommendation.alias("fix_recommendation")
+)
+
+df_analysis_readable.show()
+```
+
+### Focus on Critical Errors
+
+Filter and prioritize critical issues:
+
+```python
+critical_errors = df_analyzed.filter(
+    (df_analyzed["severity"] == "critical") | (df_analyzed["severity"] == "high")
+).select(
+    "timestamp",
+    "service",
+    df_analyzed.analysis.root_cause.alias("root_cause"),
+    df_analyzed.analysis.fix_recommendation.alias("fix_recommendation")
+)
+
+critical_errors.show()
+```
+
+### Extract Error Patterns
+
+Identify common error patterns:
+
+```python
+df_patterns = df.select(
+    "service",
+    fc.semantic.extract("error_log", ErrorPattern).alias("patterns")
+)
+
+df_pattern_details = df_patterns.select(
+    "service",
+    df_patterns.patterns.error_type.alias("error_type"),
+    df_patterns.patterns.component.alias("component")
+)
+
+df_pattern_details.show()
+```
+
+## Complete Example
+
+<CodeGroup>
+```python hello_world.py
+from typing import Optional
+from pydantic import BaseModel, Field
+import fenic as fc
+
+class ErrorAnalysis(BaseModel):
+    root_cause: str = Field(description="The root cause of this error")
+    fix_recommendation: str = Field(description="How to fix this error")
+
+class ErrorPattern(BaseModel):
+    error_type: str = Field(description="Type of error (e.g., NullPointer, Timeout, ConnectionRefused)")
+    component: str = Field(description="Affected component or system")
+
+def main(config: Optional[fc.SessionConfig] = None):
+    config = config or fc.SessionConfig(
+        app_name="hello_debug",
+        semantic=fc.SemanticConfig(
+            language_models= {
+                "mini": fc.OpenAILanguageModel(
+                    model_name="gpt-4o-mini",
+                    rpm=500,
+                    tpm=200_000
+                )
+            }
+        )
+    )
+    
+    session = fc.Session.get_or_create(config)
+    
+    # Create sample error logs
+    error_logs = [
+        {
+            "timestamp": "2024-01-20 14:23:45",
+            "service": "api-gateway",
+            "error_log": "ERROR: NullPointerException in UserService.getProfile()..."
+        },
+        # ... more logs
+    ]
+    
+    df = session.create_dataframe(error_logs)
+    
+    # Analyze errors
+    df_analyzed = df.select(
+        "timestamp",
+        "service",
+        fc.semantic.classify("error_log", ["low", "medium", "high", "critical"]).alias("severity"),
+        fc.semantic.extract("error_log", ErrorAnalysis).alias("analysis")
+    )
+    
+    df_analyzed.show()
+    
+    session.stop()
+
+if __name__ == "__main__":
+    main()
+```
+</CodeGroup>
+
+## Key Concepts
+
+### Semantic Classification
+
+`fc.semantic.classify()` assigns one of the provided labels to each row based on semantic understanding of the content.
+
+### Semantic Extraction
+
+`fc.semantic.extract()` uses Pydantic models to extract structured information from unstructured text.
+
+### Accessing Nested Fields
+
+Use `.alias()` to access fields from extracted structs:
+
+```python
+df_analyzed.analysis.root_cause.alias("root_cause")
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Generic analysis results">
+    Add more descriptive fields to your Pydantic models with detailed `description` parameters.
+  </Accordion>
+  
+  <Accordion title="Incorrect severity classification">
+    Adjust classification categories or provide more specific labels that match your use case.
+  </Accordion>
+  
+  <Accordion title="Missing error patterns">
+    Modify Pydantic model field descriptions to be more specific about what you're looking for.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+- Try adding your own error logs
+- Extract specific fields like error codes or user IDs
+- Build alerts for critical errors
+- Create auto-generated runbooks

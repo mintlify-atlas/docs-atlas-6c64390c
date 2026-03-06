@@ -1,0 +1,463 @@
+---
+title: Array Functions
+description: Functions for manipulating arrays and lists
+---
+
+Array functions provide tools for working with array columns in Fenic DataFrames. All functions are available via `fc.arr.*`.
+
+## Basic Operations
+
+### size
+
+Returns the number of elements in an array column.
+
+```python
+fc.arr.size(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays whose length to compute.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column expression representing the array length. Returns None for None arrays.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.size("tags"))
+```
+
+---
+
+### contains
+
+Checks if array column contains a specific value.
+
+```python
+fc.arr.contains(
+    column: ColumnOrName,
+    value: Union[str, int, float, bool, Column]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing the arrays to check.
+</ParamField>
+
+<ParamField path="value" type="Union[str, int, float, bool, Column]" required>
+  Value to search for in the arrays. Can be a literal value or a Column expression.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A boolean Column expression (True if value is found, False otherwise).
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.contains("tags", "python"))
+```
+
+---
+
+### element_at
+
+Returns the element at the given index in an array using 1-based indexing.
+
+```python
+fc.arr.element_at(
+    column: ColumnOrName,
+    index: Union[int, ColumnOrName]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ParamField path="index" type="Union[int, ColumnOrName]" required>
+  Index of the element (1-based). Positive indices count from the start (1 = first element), negative indices count from the end (-1 = last element).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing the element at the specified index.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.arr.element_at("numbers", 1).alias("first"),
+    fc.arr.element_at("numbers", -1).alias("last")
+)
+```
+
+---
+
+## Transformations
+
+### distinct
+
+Removes duplicate values from an array column.
+
+```python
+fc.arr.distinct(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A new column that is an array of unique values from the input column.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.distinct("array_col").alias("distinct_array"))
+```
+
+---
+
+### sort
+
+Sorts the array in ascending order.
+
+```python
+fc.arr.sort(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays of comparable types (numeric, string, date, boolean).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with sorted arrays in ascending order. Null values are placed at the end.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.sort("numbers").alias("sorted"))
+```
+
+---
+
+### reverse
+
+Reverses the elements of an array.
+
+```python
+fc.arr.reverse(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with reversed arrays.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.reverse("numbers").alias("reversed_nums"))
+```
+
+---
+
+### compact
+
+Removes null values from an array.
+
+```python
+fc.arr.compact(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with arrays having null values removed.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.compact("values").alias("compact"))
+```
+
+---
+
+### slice
+
+Extracts a subarray from an array using 1-based indexing.
+
+```python
+fc.arr.slice(
+    column: ColumnOrName,
+    start: Union[int, ColumnOrName],
+    length: Union[int, ColumnOrName]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ParamField path="start" type="Union[int, ColumnOrName]" required>
+  Starting position (1-based index). Positive indices count from the start, negative indices count from the end.
+</ParamField>
+
+<ParamField path="length" type="Union[int, ColumnOrName]" required>
+  Number of elements to extract. Must be positive.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with subarrays extracted.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.arr.slice("numbers", 1, 3).alias("first_three"),
+    fc.arr.slice("numbers", -3, 3).alias("last_three")
+)
+```
+
+---
+
+## Set Operations
+
+### union
+
+Returns the union of two arrays without duplicates.
+
+```python
+fc.arr.union(col1: ColumnOrName, col2: ColumnOrName) -> Column
+```
+
+<ParamField path="col1" type="ColumnOrName" required>
+  First array column or column name.
+</ParamField>
+
+<ParamField path="col2" type="ColumnOrName" required>
+  Second array column or column name.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing the distinct union of both arrays.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.union("tags1", "tags2").alias("all_tags"))
+```
+
+---
+
+### intersect
+
+Returns the intersection of two arrays.
+
+```python
+fc.arr.intersect(col1: ColumnOrName, col2: ColumnOrName) -> Column
+```
+
+<ParamField path="col1" type="ColumnOrName" required>
+  First array column or column name.
+</ParamField>
+
+<ParamField path="col2" type="ColumnOrName" required>
+  Second array column or column name.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing distinct elements present in both arrays.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.intersect("arr1", "arr2").alias("common"))
+```
+
+---
+
+### except_
+
+Returns elements in the first array but not in the second.
+
+```python
+fc.arr.except_(col1: ColumnOrName, col2: ColumnOrName) -> Column
+```
+
+<ParamField path="col1" type="ColumnOrName" required>
+  First array column or column name.
+</ParamField>
+
+<ParamField path="col2" type="ColumnOrName" required>
+  Second array column or column name.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing distinct elements in col1 but not in col2.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.except_("all_tags", "deprecated").alias("active"))
+```
+
+---
+
+### overlap
+
+Checks if two arrays have at least one common element.
+
+```python
+fc.arr.overlap(col1: ColumnOrName, col2: ColumnOrName) -> Column
+```
+
+<ParamField path="col1" type="ColumnOrName" required>
+  First array column or column name.
+</ParamField>
+
+<ParamField path="col2" type="ColumnOrName" required>
+  Second array column or column name.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A boolean Column (True if arrays have common elements, False otherwise).
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.overlap("arr1", "arr2").alias("has_overlap"))
+```
+
+---
+
+## Aggregation
+
+### max
+
+Returns the maximum value in an array.
+
+```python
+fc.arr.max(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays of comparable types (numeric, string, date, boolean).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing the maximum value from each array. Returns null if the array is null or empty.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.max("numbers").alias("max_value"))
+```
+
+---
+
+### min
+
+Returns the minimum value in an array.
+
+```python
+fc.arr.min(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays of comparable types.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing the minimum value from each array. Returns null if the array is null or empty.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.min("numbers").alias("min_value"))
+```
+
+---
+
+## Utility
+
+### remove
+
+Removes all occurrences of an element from an array.
+
+```python
+fc.arr.remove(
+    column: ColumnOrName,
+    element: Union[str, int, float, bool, Column]
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column or column name containing arrays.
+</ParamField>
+
+<ParamField path="element" type="Union[str, int, float, bool, Column]" required>
+  Element to remove from the arrays. Can be a literal value or a Column expression.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column with arrays having all occurrences of the element removed.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.arr.remove("tags", "a").alias("no_a"))
+```
+
+---
+
+### repeat
+
+Creates an array containing the element repeated count times.
+
+```python
+fc.arr.repeat(
+    col: ColumnOrName,
+    count: Union[int, ColumnOrName]
+) -> Column
+```
+
+<ParamField path="col" type="ColumnOrName" required>
+  Column, column name, or literal value to repeat.
+</ParamField>
+
+<ParamField path="count" type="Union[int, ColumnOrName]" required>
+  Number of times to repeat the element. Can be an integer literal or a Column expression.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A Column containing an array with the element repeated count times.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.arr.repeat(fc.lit("x"), 3).alias("repeated"),
+    fc.arr.repeat(fc.col("value"), fc.col("count")).alias("dynamic")
+)
+```

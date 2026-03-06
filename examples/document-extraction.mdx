@@ -1,0 +1,347 @@
+---
+title: 'Document Metadata Extraction'
+description: 'Extract structured metadata from unstructured documents using semantic extraction with Pydantic models'
+icon: 'file-lines'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/document_extraction/document_extraction.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Extract structured metadata from unstructured text data using Fenic's semantic extraction capabilities with Pydantic models.
+
+## Overview
+
+Document metadata extraction is a common use case for LLMs, allowing you to automatically parse and structure information from various document types including research papers, product announcements, meeting notes, news articles, and technical documentation.
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Structured Extraction" icon="table">
+    Convert unstructured text to structured metadata with defined schemas.
+  </Card>
+  <Card title="Zero-Shot Extraction" icon="bolt">
+    No examples required - just define your schema and extract.
+  </Card>
+  <Card title="Pydantic Integration" icon="shield-check">
+    Type-safe schemas with automatic validation.
+  </Card>
+  <Card title="Multi-Document" icon="files">
+    Process multiple document types in a single pipeline.
+  </Card>
+</CardGroup>
+
+## How it Works
+
+<Steps>
+  <Step title="Schema Definition with Pydantic">
+    Define a Pydantic model representing the structure you want to extract. Each field must include a natural language description.
+  </Step>
+  
+  <Step title="LLM Orchestration">
+    Fenic uses the model provider to call the LLM with structured output. The LLM returns data conforming to your schema.
+  </Step>
+  
+  <Step title="Data Structuring">
+    Extracted data is represented as a struct column in a DataFrame with native Fenic struct fields.
+  </Step>
+</Steps>
+
+## Pydantic Model Constraints
+
+Because Fenic maps Pydantic models to a strongly typed columnar data model, certain Python types are not currently supported:
+
+<Warning>
+- **Non-Optional Union types**: Not expressible in Fenic's type system
+- **Dictionaries**: Fenic does not yet support map types (future support via JsonType is planned)
+- **Custom classes / dataclasses**: Stateful or logic-heavy constructs don't fit the declarative data model
+</Warning>
+
+Despite these constraints, you can define complex extraction schemas using:
+- Nested Pydantic models
+- Optional fields
+- Lists
+- Literal types for enums
+
+## Sample Data
+
+The example processes 5 diverse document types:
+
+1. **Research Paper** - Academic abstract with technical terms
+2. **Product Announcement** - Marketing content with features and pricing
+3. **Meeting Notes** - Internal documentation with decisions and action items
+4. **News Article** - Breaking news with facts and impact
+5. **Technical Documentation** - API reference with specifications
+
+## Implementation
+
+### Session Configuration
+
+```python
+import fenic as fc
+from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
+
+config = fc.SessionConfig(
+    app_name="document_extraction",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "mini": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000,
+            )
+        }
+    ),
+)
+
+session = fc.Session.get_or_create(config)
+```
+
+### Define Pydantic Model
+
+```python
+# Define metadata extraction schema
+class DocumentMetadata(BaseModel):
+    """Pydantic model for document metadata extraction."""
+    title: str = Field(
+        description="The main title or subject of the document"
+    )
+    document_type: Literal[
+        "research paper",
+        "product announcement",
+        "meeting notes",
+        "news article",
+        "technical documentation",
+        "other"
+    ] = Field(
+        description="Type of document"
+    )
+    date: str = Field(
+        description="Any date mentioned in the document (publication date, meeting date, etc.)"
+    )
+    keywords: List[str] = Field(
+        description="List of key topics, technologies, or important terms mentioned in the document"
+    )
+    summary: str = Field(
+        description="Brief one-sentence summary of the document's main purpose or content"
+    )
+```
+
+<Info>
+Field descriptions are critical - they guide the LLM on what to extract and how to interpret the content.
+</Info>
+
+### Sample Documents
+
+```python
+documents_data = [
+    {
+        "id": "doc_001",
+        "text": "Neural Networks for Climate Prediction: A Comprehensive Study. Published March 15, 2024. This research presents a novel deep learning approach for predicting climate patterns using multi-layered neural networks. Our methodology combines satellite imagery data with ground-based sensor readings to achieve 94% accuracy in temperature forecasting. Keywords: machine learning, climate modeling, neural networks, environmental science."
+    },
+    {
+        "id": "doc_002",
+        "text": "Introducing CloudSync Pro - Next-Generation File Synchronization. Release Date: January 8, 2024. CloudSync Pro revolutionizes how teams collaborate with real-time file synchronization across unlimited devices. Features include end-to-end encryption, automatic conflict resolution, and integration with over 50 productivity tools. Pricing starts at $12/month per user."
+    },
+    # ... more documents
+]
+
+docs_df = session.create_dataframe(documents_data)
+```
+
+### Apply Extraction
+
+```python
+# Extract metadata using Pydantic model
+pydantic_extracted_df = docs_df.select(
+    "id",
+    fc.semantic.extract("text", DocumentMetadata).alias("metadata")
+)
+
+# Flatten the extracted metadata into separate columns
+pydantic_results = pydantic_extracted_df.select(
+    "id",
+    pydantic_extracted_df.metadata.title.alias("title"),
+    pydantic_extracted_df.metadata.document_type.alias("document_type"),
+    pydantic_extracted_df.metadata.date.alias("date"),
+    pydantic_extracted_df.metadata.keywords.alias("keywords"),
+    pydantic_extracted_df.metadata.summary.alias("summary")
+)
+
+print("Extraction Results:")
+pydantic_results.show()
+```
+
+## Extracted Metadata Fields
+
+### Title
+Main subject or heading of the document
+
+**Example**: "Neural Networks for Climate Prediction: A Comprehensive Study"
+
+### Document Type
+Classification from predefined categories using `Literal` type
+
+**Options**: research paper, product announcement, meeting notes, news article, technical documentation, other
+
+### Date
+Any relevant date mentioned (publication, meeting, release, etc.)
+
+**Example**: "March 15, 2024"
+
+### Keywords
+List of key topics and terms
+
+**Example**: `["machine learning", "climate modeling", "neural networks", "environmental science"]`
+
+### Summary
+One-sentence overview of the document's purpose
+
+**Example**: "This research presents a novel deep learning approach for predicting climate patterns."
+
+## Expected Output
+
+| id | title | document_type | date | keywords | summary |
+|----|-------|--------------|------|----------|----------|
+| doc_001 | Neural Networks for Climate Prediction | research paper | March 15, 2024 | ["machine learning", "climate modeling", ...] | Novel deep learning approach for climate patterns |
+| doc_002 | Introducing CloudSync Pro | product announcement | January 8, 2024 | ["file synchronization", "collaboration", ...] | Real-time file synchronization for teams |
+| doc_003 | Weekly Engineering Standup | meeting notes | December 4, 2023 | ["Kubernetes", "CI/CD", "API rate limiting"] | Engineering decisions and action items |
+| doc_004 | Major Data Breach Affects Users | news article | December 12, 2023 | ["data breach", "security", "TechCorp"] | Unauthorized database access affecting millions |
+| doc_005 | API Reference: Authentication Service | technical documentation | February 20, 2024 | ["OAuth", "SAML", "authentication"] | Secure user login and session management API |
+
+## Advanced Schemas
+
+### Nested Models
+
+```python
+class Author(BaseModel):
+    name: str = Field(description="Author's full name")
+    affiliation: str = Field(description="Author's institution or company")
+
+class ResearchPaper(BaseModel):
+    title: str = Field(description="Paper title")
+    authors: List[Author] = Field(description="List of paper authors")
+    abstract: str = Field(description="Paper abstract")
+    keywords: List[str] = Field(description="Research keywords")
+```
+
+### Optional Fields
+
+```python
+class DocumentMetadata(BaseModel):
+    title: str = Field(description="Document title")
+    subtitle: Optional[str] = Field(
+        default=None,
+        description="Document subtitle if present"
+    )
+    publication_date: Optional[str] = Field(
+        default=None,
+        description="Publication date if mentioned"
+    )
+```
+
+### Literal Types for Enums
+
+```python
+from typing import Literal
+
+class Article(BaseModel):
+    sentiment: Literal["positive", "negative", "neutral"] = Field(
+        description="Overall sentiment of the article"
+    )
+    urgency: Literal["low", "medium", "high", "critical"] = Field(
+        description="Urgency level based on content"
+    )
+```
+
+## Running the Example
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="your-api-key"
+
+# Run the extraction
+python document_extraction.py
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Research Paper Processing" icon="microscope">
+    Extract authors, abstracts, citations, and metadata from academic papers.
+  </Card>
+  <Card title="Email Classification" icon="envelope">
+    Parse emails to extract sender, subject, priority, and action items.
+  </Card>
+  <Card title="Contract Analysis" icon="file-contract">
+    Extract parties, dates, terms, and obligations from legal documents.
+  </Card>
+  <Card title="Product Reviews" icon="star">
+    Parse reviews for product names, ratings, pros/cons, and sentiment.
+  </Card>
+  <Card title="News Monitoring" icon="newspaper">
+    Extract entities, dates, locations, and summaries from news articles.
+  </Card>
+  <Card title="Resume Parsing" icon="user">
+    Extract candidate information, skills, experience, and education.
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+### 1. Clear Field Descriptions
+
+```python
+# Good - specific and clear
+keywords: List[str] = Field(
+    description="Technical terms, product names, and key concepts mentioned in the text"
+)
+
+# Bad - vague
+keywords: List[str] = Field(description="Keywords")
+```
+
+### 2. Use Literal for Known Values
+
+```python
+# Use Literal when values come from a known set
+document_type: Literal["email", "report", "memo"] = Field(...)
+
+# Use str when values are open-ended
+title: str = Field(...)
+```
+
+### 3. Provide Examples in Descriptions
+
+```python
+date: str = Field(
+    description="Date in format YYYY-MM-DD (e.g., 2024-03-15)"
+)
+```
+
+### 4. Use Optional for Missing Data
+
+```python
+author: Optional[str] = Field(
+    default=None,
+    description="Author name if mentioned in the document"
+)
+```
+
+## Learning Outcomes
+
+This example teaches:
+
+- How to define extraction schemas with Pydantic
+- Best practices for field descriptions
+- Working with nested models and lists
+- Handling optional fields and default values
+- Using Literal types for classification
+- Unnesting extracted structs into columns
+
+<Tip>
+Start with simple schemas and iterate. Test on a few documents, refine your field descriptions based on extraction quality, then scale to your full dataset.
+</Tip>

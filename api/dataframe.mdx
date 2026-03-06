@@ -1,0 +1,809 @@
+---
+title: DataFrame
+description: A data collection organized into named columns with lazy evaluation
+---
+
+The `DataFrame` class represents a lazily evaluated computation on data. Operations build up a logical query plan that is only executed when an action is called.
+
+<Note>
+  Direct construction using `DataFrame()` is not allowed. Create DataFrames through `Session.create_dataframe()` or other Session methods.
+</Note>
+
+## Properties
+
+### schema
+
+```python
+df.schema -> Schema
+```
+
+Get the schema of this DataFrame.
+
+<ResponseField name="Schema" type="Schema">
+  Schema containing field names and data types
+</ResponseField>
+
+```python
+df.schema
+# Schema([
+#     ColumnField('name', StringType),
+#     ColumnField('age', IntegerType)
+# ])
+```
+
+### columns
+
+```python
+df.columns -> List[str]
+```
+
+Get list of column names.
+
+<ResponseField name="columns" type="List[str]">
+  List of all column names in the DataFrame
+</ResponseField>
+
+```python
+df.columns
+# ['name', 'age', 'city']
+```
+
+### semantic
+
+```python
+df.semantic -> SemanticExtensions
+```
+
+Interface for semantic operations (LLM-powered transformations) on the DataFrame.
+
+<ResponseField name="SemanticExtensions" type="SemanticExtensions">
+  Semantic operations interface
+</ResponseField>
+
+```python
+# Semantic extraction
+df.semantic.extract(
+    "content",
+    schema=MyPydanticModel,
+    model="gpt-4o-mini"
+)
+```
+
+### write
+
+```python
+df.write -> DataFrameWriter
+```
+
+Interface for saving the content of the DataFrame.
+
+<ResponseField name="DataFrameWriter" type="DataFrameWriter">
+  Writer interface to write DataFrame to various formats
+</ResponseField>
+
+```python
+# Write to Parquet
+df.write.parquet("output.parquet")
+
+# Write to CSV
+df.write.csv("output.csv")
+```
+
+## Selection and Filtering
+
+### select
+
+```python
+df.select(*cols: ColumnOrName) -> DataFrame
+```
+
+Projects a set of Column expressions or column names.
+
+<ParamField path="cols" type="ColumnOrName" required>
+  Column expressions to select. Can be string column names or Column objects.
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame with selected columns
+</ResponseField>
+
+```python
+# Select by column names
+df.select("name", "age")
+
+# Select with expressions
+df.select(col("name"), col("age") + 1)
+
+# Mix strings and expressions
+df.select("name", col("age") * 2)
+```
+
+### filter / where
+
+```python
+df.filter(condition: Column) -> DataFrame
+df.where(condition: Column) -> DataFrame
+```
+
+Filters rows using the given condition.
+
+<ParamField path="condition" type="Column" required>
+  A Column expression that evaluates to a boolean
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Filtered DataFrame
+</ResponseField>
+
+```python
+# Numeric comparison
+df.filter(col("age") > 25)
+
+# Multiple conditions
+df.filter((col("age") > 25) & (col("age") <= 35))
+
+# String matching
+df.filter(col("name").contains("Alice"))
+```
+
+### drop
+
+```python
+df.drop(*col_names: str) -> DataFrame
+```
+
+Remove one or more columns from this DataFrame.
+
+<ParamField path="col_names" type="str" required>
+  Names of columns to drop
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame without specified columns
+</ResponseField>
+
+```python
+# Drop single column
+df.drop("age")
+
+# Drop multiple columns
+df.drop("id", "age")
+```
+
+## Adding and Modifying Columns
+
+### with_column
+
+```python
+df.with_column(
+    col_name: str,
+    col: Union[Any, Column, pl.Series, pd.Series]
+) -> DataFrame
+```
+
+Add a new column or replace an existing column.
+
+<ParamField path="col_name" type="str" required>
+  Name of the new column
+</ParamField>
+
+<ParamField path="col" type="Union[Any, Column, pl.Series, pd.Series]" required>
+  Column expression, Series, or value to assign:
+  - Column: A Column expression
+  - pl.Series or pd.Series: A Series (length must match DataFrame height)
+  - Any other value: Treated as a literal (broadcast to all rows)
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame with added/replaced column
+</ResponseField>
+
+<CodeGroup>
+```python Literal Value
+df.with_column("constant", 1)
+```
+
+```python Computed Column
+df.with_column("double_age", col("age") * 2)
+```
+
+```python From Series
+import polars as pl
+
+bonus = pl.Series([100, 200])
+df.with_column("bonus", bonus)
+```
+
+```python Complex Expression
+df.with_column(
+    "age_category",
+    when(col("age") < 30, "young")
+    .when(col("age") < 50, "middle")
+    .otherwise("senior")
+)
+```
+</CodeGroup>
+
+### with_columns
+
+```python
+df.with_columns(
+    cols_map: Dict[str, Union[Any, Column, pl.Series, pd.Series]]
+) -> DataFrame
+```
+
+Add multiple new columns or replace existing columns.
+
+<ParamField path="cols_map" type="Dict[str, Union[Any, Column, pl.Series, pd.Series]]" required>
+  Dictionary where keys are column names and values are Column expressions, Series, or literal values
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame with added/replaced columns
+</ResponseField>
+
+```python
+df.with_columns({
+    "double_age": col("age") * 2,
+    "constant": 1,
+    "age_plus_10": col("age") + 10
+})
+```
+
+<Warning>
+  All columns are created at once, so new columns cannot depend on each other. Use chained `with_column()` calls for dependent columns.
+</Warning>
+
+### with_column_renamed
+
+```python
+df.with_column_renamed(col_name: str, new_col_name: str) -> DataFrame
+```
+
+Rename a column. No-op if the column does not exist.
+
+<ParamField path="col_name" type="str" required>
+  Name of the column to rename
+</ParamField>
+
+<ParamField path="new_col_name" type="str" required>
+  New name for the column
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame with the column renamed
+</ResponseField>
+
+```python
+df.with_column_renamed("age", "age_in_years")
+```
+
+## Aggregations and Grouping
+
+### group_by
+
+```python
+df.group_by(*cols: ColumnOrName) -> GroupedData
+```
+
+Groups the DataFrame using the specified columns.
+
+<ParamField path="cols" type="ColumnOrName" required>
+  Columns to group by. Can be column names as strings or Column expressions.
+</ParamField>
+
+<ResponseField name="GroupedData" type="GroupedData">
+  Object for performing aggregations on the grouped data
+</ResponseField>
+
+```python
+# Group by single column
+df.group_by("department").agg(count("*"))
+
+# Group by multiple columns
+df.group_by("department", "location").agg({"salary": "avg"})
+
+# Group by expression
+df.group_by(lower(col("department"))).agg(count("*"))
+```
+
+### agg
+
+```python
+df.agg(*exprs: Union[Column, Dict[str, str]]) -> DataFrame
+```
+
+Aggregate on the entire DataFrame without groups.
+
+<ParamField path="exprs" type="Union[Column, Dict[str, str]]" required>
+  Aggregation expressions or dictionary of aggregations
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Aggregation results
+</ResponseField>
+
+```python
+# Multiple aggregations
+df.agg(
+    count().alias("total_rows"),
+    avg(col("salary")).alias("avg_salary")
+)
+
+# Dictionary style
+df.agg({"salary": "avg", "age": "max"})
+```
+
+## Joins and Unions
+
+### join
+
+```python
+df.join(
+    other: DataFrame,
+    on: Optional[Union[str, List[str]]] = None,
+    *,
+    left_on: Optional[Union[ColumnOrName, List[ColumnOrName]]] = None,
+    right_on: Optional[Union[ColumnOrName, List[ColumnOrName]]] = None,
+    how: JoinType = "inner"
+) -> DataFrame
+```
+
+Joins this DataFrame with another DataFrame.
+
+<ParamField path="other" type="DataFrame" required>
+  DataFrame to join with
+</ParamField>
+
+<ParamField path="on" type="Union[str, List[str]]">
+  Join condition(s). Can be column name(s), Column expression(s), or None for cross joins
+</ParamField>
+
+<ParamField path="left_on" type="Union[ColumnOrName, List[ColumnOrName]]">
+  Column(s) from left DataFrame to join on
+</ParamField>
+
+<ParamField path="right_on" type="Union[ColumnOrName, List[ColumnOrName]]">
+  Column(s) from right DataFrame to join on
+</ParamField>
+
+<ParamField path="how" type="JoinType" default="inner">
+  Type of join: "inner", "left", "right", "outer", "cross"
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Joined DataFrame
+</ResponseField>
+
+<CodeGroup>
+```python Join on Column Name
+df1.join(df2, on="id")
+```
+
+```python Join with Expressions
+df1.join(
+    df2,
+    left_on=col("id"),
+    right_on=col("id")
+)
+```
+
+```python Cross Join
+df1.join(df2, how="cross")
+```
+</CodeGroup>
+
+### union
+
+```python
+df.union(other: DataFrame) -> DataFrame
+```
+
+Return a new DataFrame containing the union of rows in this and another DataFrame.
+
+<ParamField path="other" type="DataFrame" required>
+  Another DataFrame with the same schema
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame containing rows from both DataFrames
+</ResponseField>
+
+```python
+df1.union(df2)
+
+# Remove duplicates after union
+df1.union(df2).drop_duplicates()
+```
+
+<Info>
+  This is equivalent to UNION ALL in SQL. To remove duplicates, use `drop_duplicates()` after union.
+</Info>
+
+## Sorting and Limiting
+
+### sort / order_by
+
+```python
+df.sort(
+    cols: Union[ColumnOrName, List[ColumnOrName], None] = None,
+    ascending: Optional[Union[bool, List[bool]]] = None
+) -> DataFrame
+df.order_by(
+    cols: Union[ColumnOrName, List[ColumnOrName], None] = None,
+    ascending: Optional[Union[bool, List[bool]]] = None
+) -> DataFrame
+```
+
+Sort the DataFrame by the specified columns.
+
+<ParamField path="cols" type="Union[ColumnOrName, List[ColumnOrName]]">
+  Columns to sort by. Can include sorting directives like `asc()`, `desc()`
+</ParamField>
+
+<ParamField path="ascending" type="Union[bool, List[bool]]">
+  Boolean or list of booleans indicating sort order
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Sorted DataFrame
+</ResponseField>
+
+```python
+# Sort ascending
+df.sort(col("age").asc())
+
+# Sort descending
+df.sort(col("age").desc())
+
+# Boolean parameter
+df.sort("age", ascending=False)
+
+# Multiple columns
+df.sort(col("age").desc(), col("name").asc())
+```
+
+### limit
+
+```python
+df.limit(n: int) -> DataFrame
+```
+
+Limits the number of rows to the specified number.
+
+<ParamField path="n" type="int" required>
+  Maximum number of rows to return
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  DataFrame with at most n rows
+</ResponseField>
+
+```python
+df.limit(10)
+```
+
+## Array and Struct Operations
+
+### explode
+
+```python
+df.explode(column: ColumnOrName) -> DataFrame
+```
+
+Create a new row for each element in an array column.
+
+<ParamField path="column" type="ColumnOrName" required>
+  Name of array column to explode or Column expression
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame with the array column exploded into multiple rows
+</ResponseField>
+
+```python
+df = session.create_dataframe({
+    "id": [1, 2],
+    "tags": [["red", "blue"], ["green"]]
+})
+
+df.explode("tags")
+# id | tags
+# ---|------
+#  1 | red
+#  1 | blue
+#  2 | green
+```
+
+### explode_with_index
+
+```python
+df.explode_with_index(
+    column: ColumnOrName,
+    index_col_name: str = "pos",
+    value_col_name: str = "col",
+    keep_null_and_empty: bool = False
+) -> DataFrame
+```
+
+Create a new row for each element in an array column, with the element's position and value.
+
+<ParamField path="column" type="ColumnOrName" required>
+  Name of array column to explode
+</ParamField>
+
+<ParamField path="index_col_name" type="str" default="pos">
+  Name for the position column
+</ParamField>
+
+<ParamField path="value_col_name" type="str" default="col">
+  Name for the value column
+</ParamField>
+
+<ParamField path="keep_null_and_empty" type="bool" default="False">
+  If True, preserves rows where the array is null or empty
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  New DataFrame with position and value columns
+</ResponseField>
+
+```python
+df.explode_with_index("tags")
+# pos | id | tags
+# ----|----|----- 
+#   0 |  1 | red
+#   1 |  1 | blue
+#   0 |  2 | green
+```
+
+### unnest
+
+```python
+df.unnest(*col_names: str) -> DataFrame
+```
+
+Unnest the specified struct columns into separate columns.
+
+<ParamField path="col_names" type="str" required>
+  One or more struct columns to unnest
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame with struct columns expanded
+</ResponseField>
+
+```python
+df = session.create_dataframe({
+    "id": [1, 2],
+    "tags": [{"red": 1, "blue": 2}, {"red": 3}]
+})
+
+df.unnest("tags")
+# id | red | blue
+# ---|-----|-----
+#  1 |   1 |    2
+#  2 |   3 | null
+```
+
+## Deduplication
+
+### distinct
+
+```python
+df.distinct() -> DataFrame
+```
+
+Return a DataFrame with duplicate rows removed.
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame with duplicate rows removed
+</ResponseField>
+
+```python
+df.distinct()
+```
+
+### drop_duplicates
+
+```python
+df.drop_duplicates(subset: Optional[List[str]] = None) -> DataFrame
+```
+
+Return a DataFrame with duplicate rows removed.
+
+<ParamField path="subset" type="List[str]">
+  Column names to consider when identifying duplicates. If not provided, all columns are considered.
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame with duplicate rows removed
+</ResponseField>
+
+```python
+# Remove duplicates considering all columns
+df.drop_duplicates()
+
+# Remove duplicates considering specific columns
+df.drop_duplicates(["c1", "c2"])
+```
+
+## Caching
+
+### persist / cache
+
+```python
+df.persist() -> DataFrame
+df.cache() -> DataFrame
+```
+
+Mark this DataFrame to be persisted after first computation.
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Same DataFrame, but marked for persistence
+</ResponseField>
+
+```python
+# Cache intermediate results
+filtered_df = (
+    df.filter(col("age") > 25)
+    .persist()  # Cache these results
+)
+
+# Both operations use cached results
+result1 = filtered_df.group_by("department").count()
+result2 = filtered_df.select("name", "salary")
+```
+
+## Actions (Trigger Execution)
+
+### show
+
+```python
+df.show(n: int = 10, explain_analyze: bool = False) -> None
+```
+
+Display the DataFrame content in a tabular form.
+
+<ParamField path="n" type="int" default="10">
+  Number of rows to display
+</ParamField>
+
+<ParamField path="explain_analyze" type="bool" default="False">
+  Whether to print the explain analyze plan
+</ParamField>
+
+```python
+df.show()
+df.show(20)
+df.show(10, explain_analyze=True)
+```
+
+### collect
+
+```python
+df.collect(data_type: DataLikeType = "polars") -> QueryResult
+```
+
+Execute the DataFrame computation and return the result as a QueryResult.
+
+<ParamField path="data_type" type="DataLikeType" default="polars">
+  Type of data to return: "polars", "pandas", "arrow", "pydict", "pylist"
+</ParamField>
+
+<ResponseField name="QueryResult" type="QueryResult">
+  A QueryResult with materialized data and query metrics
+</ResponseField>
+
+```python
+result = df.collect()
+data = result.data
+metrics = result.metrics
+```
+
+### to_polars / to_pandas / to_arrow
+
+```python
+df.to_polars() -> pl.DataFrame
+df.to_pandas() -> pd.DataFrame
+df.to_arrow() -> pa.Table
+```
+
+Execute the DataFrame computation and return results in specific format.
+
+<ResponseField name="result" type="Union[pl.DataFrame, pd.DataFrame, pa.Table]">
+  Materialized results in the requested format
+</ResponseField>
+
+```python
+pl_df = df.to_polars()
+pd_df = df.to_pandas()
+arrow_table = df.to_arrow()
+```
+
+### to_pydict / to_pylist
+
+```python
+df.to_pydict() -> Dict[str, List[Any]]
+df.to_pylist() -> List[Dict[str, Any]]
+```
+
+Execute the DataFrame computation and return Python data structures.
+
+<ResponseField name="result" type="Union[Dict[str, List[Any]], List[Dict[str, Any]]]">
+  Materialized results as Python dictionary or list
+</ResponseField>
+
+```python
+# Dictionary of column arrays
+data_dict = df.to_pydict()
+# {"col1": [1, 2, 3], "col2": ["a", "b", "c"]}
+
+# List of row dictionaries
+data_list = df.to_pylist()
+# [{"col1": 1, "col2": "a"}, {"col1": 2, "col2": "b"}]
+```
+
+### count
+
+```python
+df.count() -> int
+```
+
+Count the number of rows in the DataFrame.
+
+<ResponseField name="count" type="int">
+  The number of rows in the DataFrame
+</ResponseField>
+
+```python
+num_rows = df.count()
+```
+
+## Lineage
+
+### lineage
+
+```python
+df.lineage() -> Lineage
+```
+
+Create a Lineage object to trace data through transformations.
+
+<ResponseField name="Lineage" type="Lineage">
+  Interface for querying data lineage
+</ResponseField>
+
+```python
+lineage = df.lineage()
+
+# Trace backwards
+source_rows = lineage.backward(["result_uuid1", "result_uuid2"])
+
+# Trace forwards
+result_rows = lineage.forward(["source_uuid1"])
+```
+
+## Utility Methods
+
+### explain
+
+```python
+df.explain() -> None
+```
+
+Display the logical plan of the DataFrame.
+
+```python
+df.explain()
+```
+
+## Aliases
+
+- `withColumn` → `with_column`
+- `withColumns` → `with_columns`
+- `withColumnRenamed` → `with_column_renamed`
+- `groupBy` / `groupby` → `group_by`
+- `dropDuplicates` → `drop_duplicates`
+- `orderBy` → `order_by`
+- `unionAll` → `union`

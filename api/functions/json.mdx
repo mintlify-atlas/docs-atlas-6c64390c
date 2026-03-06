@@ -1,0 +1,130 @@
+---
+title: JSON Functions
+description: Functions for working with JSON data
+---
+
+JSON functions provide tools for querying, analyzing, and manipulating JSON data. All functions are available via `fc.json.*`.
+
+## jq
+
+Applies a JQ query to a column containing JSON-formatted strings.
+
+```python
+fc.json.jq(column: ColumnOrName, query: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column of type `JsonType`.
+</ParamField>
+
+<ParamField path="query" type="str" required>
+  A [JQ](https://jqlang.org/) expression used to extract or transform values.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the result of applying the JQ query to each row's JSON input.
+</ResponseField>
+
+<Note>
+The input column must be of type `JsonType`. Use `cast(JsonType)` if needed to ensure correct typing.
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Extract nested field
+df.select(fc.json.jq(fc.col("json_col"), ".user.name"))
+```
+
+```python Cast to JsonType before querying
+df.select(fc.json.jq(fc.col("raw_json").cast(JsonType), ".event.type"))
+```
+
+```python Work with arrays
+df.select(fc.json.jq(fc.col("json_array"), "map(.id)"))
+```
+</CodeGroup>
+
+---
+
+## get_type
+
+Get the JSON type of each value.
+
+```python
+fc.json.get_type(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column of type `JsonType`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of strings indicating the JSON type: `"string"`, `"number"`, `"boolean"`, `"array"`, `"object"`, or `"null"`.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Get JSON types
+df.select(fc.json.get_type(fc.col("json_data")))
+```
+
+```python Filter by type
+df.filter(fc.json.get_type(fc.col("data")) == "array")
+```
+</CodeGroup>
+
+---
+
+## contains
+
+Check if a JSON value contains the specified value using recursive deep search.
+
+```python
+fc.json.contains(column: ColumnOrName, value: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column of type `JsonType`.
+</ParamField>
+
+<ParamField path="value" type="str" required>
+  Valid JSON string to search for.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of booleans indicating whether the JSON contains the value.
+</ResponseField>
+
+### Matching Rules
+
+- **Objects**: Uses partial matching - `{"role": "admin"}` matches `{"role": "admin", "level": 5}`
+- **Arrays**: Uses exact matching - `[1, 2]` only matches exactly `[1, 2]`, not `[1, 2, 3]`
+- **Primitives**: Uses exact matching - `42` matches `42` but not `"42"`
+- **Search is recursive**: Searches at all nesting levels throughout the JSON structure
+- **Type-aware**: Distinguishes between `42` (number) and `"42"` (string)
+
+### Examples
+
+<CodeGroup>
+```python Find objects with partial structure match
+df.select(fc.json.contains(fc.col("json_data"), '{"name": "Alice"}'))
+# Matches: {"name": "Alice", "age": 30} and {"user": {"name": "Alice"}}
+```
+
+```python Find exact array match
+df.select(fc.json.contains(fc.col("json_data"), '["read", "write"]'))
+# Matches: {"permissions": ["read", "write"]} but not ["read", "write", "admin"]
+```
+
+```python Find exact primitive values
+df.select(fc.json.contains(fc.col("json_data"), '"admin"'))
+# Matches: {"role": "admin"} and ["admin", "user"]
+```
+
+```python Type distinction
+df.select(fc.json.contains(fc.col("json_data"), '42'))      # number 42
+df.select(fc.json.contains(fc.col("json_data"), '"42"'))    # string "42"
+```
+</CodeGroup>

@@ -1,0 +1,348 @@
+---
+title: 'Meeting Transcript Processing'
+description: 'Automatically extract actionable insights from engineering meeting transcripts using semantic extraction'
+icon: 'microphone'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/meeting_transcript_processing/transcript_processing.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Automatically extract actionable insights from engineering meeting transcripts using semantic extraction and structured data processing.
+
+## Overview
+
+Engineering teams generate valuable knowledge in meetings, but capturing and organizing this information is often manual and error-prone. This pipeline automates the extraction of:
+
+- **Action Items**: Tasks, assignees, and deadlines
+- **Decisions**: Key decisions and their rationale
+- **Technical Entities**: Services, technologies, metrics, and incident references
+- **Team Analytics**: Workload distribution and productivity metrics
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Native Transcript Parsing" icon="file-lines">
+    Built-in support for parsing transcript formats with speaker and timing information.
+  </Card>
+  <Card title="Semantic Extraction" icon="brain">
+    LLM-powered extraction of technical entities, action items, and decisions.
+  </Card>
+  <Card title="Structured Processing" icon="database">
+    Transform unstructured meeting content into queryable DataFrames.
+  </Card>
+  <Card title="Team Analytics" icon="chart-line">
+    Generate workload metrics and productivity insights automatically.
+  </Card>
+</CardGroup>
+
+## Sample Data
+
+The example processes three types of engineering meetings:
+
+1. **Architecture Review** - Technical discussions about system design and bottlenecks
+2. **Incident Post-Mortem** - Analysis of outages and mitigation strategies
+3. **Sprint Planning** - Task allocation and project prioritization
+
+## Pipeline Steps
+
+<Steps>
+  <Step title="Parse Transcripts">
+    Use `fc.text.parse_transcript()` to convert raw text into structured segments with speaker and timing data.
+  </Step>
+  
+  <Step title="Extract Segments">
+    Break down transcripts into individual speaking segments using `explode()` and `unnest()`.
+  </Step>
+  
+  <Step title="Define Schemas">
+    Create Pydantic models for technical entities, action items, and decisions.
+  </Step>
+  
+  <Step title="Apply Semantic Extraction">
+    Use `fc.semantic.extract()` to identify structured information from natural language.
+  </Step>
+  
+  <Step title="Generate Analytics">
+    Aggregate insights and create actionable reports for team leads.
+  </Step>
+</Steps>
+
+## Implementation
+
+### Step 1: Parse Transcripts
+
+```python
+import fenic as fc
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+# Configure session
+config = fc.SessionConfig(
+    app_name="meeting_transcript_processing",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "nano": fc.OpenAILanguageModel(
+                model_name="gpt-4.1-nano",
+                rpm=500,
+                tpm=200_000,
+            )
+        }
+    ),
+)
+
+session = fc.Session.get_or_create(config)
+
+# Parse transcripts using native function
+parsed_transcripts_df = transcripts_df.with_column(
+    "structured_transcript",
+    fc.text.parse_transcript(fc.col("transcript"), "generic"),
+)
+```
+
+<Info>
+The `generic` format handles transcripts in the format:
+```
+speaker (00:00:00)
+content
+```
+</Info>
+
+### Step 2: Extract Speaking Segments
+
+```python
+# Explode structured transcript into individual segments
+segments_df = (
+    parsed_transcripts_df.explode("structured_transcript")
+    .unnest("structured_transcript")
+    .select(
+        fc.col("meeting_id"),
+        fc.col("meeting_type"),
+        fc.col("speaker"),
+        fc.col("start_time"),
+        fc.col("content"),
+    )
+)
+
+print("Individual speaking segments:")
+segments_df.show(5)
+```
+
+### Step 3: Define Extraction Schemas
+
+```python
+# Technical entities schema
+class TechnicalEntitiesSchema(BaseModel):
+    services: List[str] = Field(
+        description="Technical services or systems mentioned (e.g., user-service, auth-service)"
+    )
+    technologies: List[str] = Field(
+        description="Technologies, databases, or tools mentioned (e.g., Redis, PostgreSQL, JWT)"
+    )
+    metrics: List[str] = Field(
+        description="Performance metrics, numbers, or measurements mentioned"
+    )
+    incident_references: List[str] = Field(
+        description="Incident IDs, ticket numbers, or reference numbers mentioned"
+    )
+
+# Action items schema
+class ActionItemSchema(BaseModel):
+    has_action_item: str = Field(
+        description="Whether this segment contains an action item (yes/no)"
+    )
+    assignee: Optional[str] = Field(
+        default=None,
+        description="Person assigned to the action item (if any)"
+    )
+    task_description: str = Field(
+        description="Description of the task or action to be completed"
+    )
+    deadline: Optional[str] = Field(
+        default=None,
+        description="When the task should be completed (if mentioned)"
+    )
+
+# Decisions schema
+class DecisionSchema(BaseModel):
+    has_decision: str = Field(
+        description="Whether this segment contains a decision (yes/no)"
+    )
+    decision_summary: str = Field(
+        description="Summary of the decision made"
+    )
+    decision_rationale: Optional[str] = Field(
+        default=None,
+        description="Why this decision was made (if mentioned)"
+    )
+```
+
+### Step 4: Apply Semantic Extraction
+
+```python
+# Extract all information from each segment
+enriched_df = (
+    segments_df.with_column(
+        "technical_entities",
+        fc.semantic.extract(fc.col("content"), TechnicalEntitiesSchema),
+    )
+    .with_column(
+        "action_items",
+        fc.semantic.extract(fc.col("content"), ActionItemSchema)
+    )
+    .with_column(
+        "decisions",
+        fc.semantic.extract(fc.col("content"), DecisionSchema)
+    )
+    .cache()
+)
+
+# Flatten the extracted data
+insights_df = (
+    enriched_df.unnest("technical_entities")
+    .unnest("action_items")
+    .unnest("decisions")
+    .select(
+        fc.col("meeting_id"),
+        fc.col("meeting_type"),
+        fc.col("speaker"),
+        fc.col("content"),
+        fc.col("services"),
+        fc.col("technologies"),
+        fc.col("has_action_item"),
+        fc.col("assignee"),
+        fc.col("task_description"),
+        fc.col("deadline"),
+        fc.col("has_decision"),
+        fc.col("decision_summary"),
+    )
+)
+```
+
+### Step 5: Generate Analytics
+
+```python
+# Extract action items summary
+action_items_summary = insights_df.filter(
+    fc.col("has_action_item") == "yes"
+).select(
+    fc.col("meeting_id"),
+    fc.col("meeting_type"),
+    fc.col("assignee"),
+    fc.col("task_description"),
+    fc.col("deadline"),
+)
+
+print("Action Items Summary:")
+action_items_summary.show()
+
+# Extract decisions summary
+decisions_summary = insights_df.filter(
+    fc.col("has_decision") == "yes"
+).select(
+    fc.col("meeting_id"),
+    fc.col("meeting_type"),
+    fc.col("decision_summary"),
+    fc.col("decision_rationale"),
+)
+
+print("Decisions Summary:")
+decisions_summary.show()
+
+# Technology mentions across meetings
+all_technologies = (
+    insights_df.select(fc.col("meeting_id"), fc.col("technologies"))
+    .explode("technologies")
+    .filter(fc.col("technologies").is_not_null() & (fc.col("technologies") != ""))
+    .group_by("technologies")
+    .agg(fc.count(fc.col("meeting_id")).alias("mention_count"))
+    .sort("mention_count", ascending=False)
+)
+
+print("Most Mentioned Technologies:")
+all_technologies.show()
+
+# Team member workload
+assignee_workload = (
+    insights_df.filter(fc.col("has_action_item") == "yes")
+    .group_by("assignee")
+    .agg(fc.count("*").alias("assigned_tasks"))
+    .order_by(fc.col("assigned_tasks").desc())
+)
+
+print("Team Member Workload (Action Items):")
+assignee_workload.show()
+```
+
+## Expected Output
+
+### Action Items Summary
+
+| meeting_id | meeting_type | assignee | task_description | deadline |
+|------------|--------------|----------|------------------|----------|
+| ARCH-2024-1 | Architecture Review | Mike | investigate Redis implementation | next Friday |
+| INC-2024-12 | Incident Post-Mortem | Sam | review batch processing code | tomorrow EOD |
+| SPRINT-23 | Sprint Planning | Lisa | create migration plan | Wednesday |
+
+### Team Workload Distribution
+
+| assignee | assigned_tasks |
+|----------|----------------|
+| Mike | 2 |
+| Lisa | 1 |
+| Sam | 1 |
+
+### Technology Mentions
+
+| technologies | mention_count |
+|--------------|---------------|
+| Redis | 3 |
+| PostgreSQL | 2 |
+| JWT | 2 |
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Engineering Managers" icon="user-tie">
+    Track team workload and action item distribution across meetings.
+  </Card>
+  <Card title="Technical Program Managers" icon="clipboard-list">
+    Monitor project decisions and technical debt accumulation.
+  </Card>
+  <Card title="DevOps Teams" icon="server">
+    Analyze incident patterns and response procedures.
+  </Card>
+  <Card title="Architecture Teams" icon="sitemap">
+    Identify technology adoption trends and system bottlenecks.
+  </Card>
+</CardGroup>
+
+## Running the Example
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="your-api-key-here"
+
+# Run the pipeline
+python transcript_processing.py
+```
+
+## Extensions
+
+The example can be extended to:
+
+- Integrate with calendar systems for automatic transcript ingestion
+- Export to project management tools (Jira, Linear, etc.)
+- Build dashboards for engineering metrics
+- Create automated follow-up reminders
+- Analyze team communication patterns
+
+## Technical Notes
+
+<Note>
+- Uses `gpt-4.1-nano` for fast and cost-effective semantic extraction
+- Handles mixed transcript formats automatically
+- Caching with `.cache()` prevents re-running expensive LLM operations
+</Note>

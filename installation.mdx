@@ -1,0 +1,271 @@
+---
+title: Installation
+description: Install Fenic and configure your environment
+---
+
+# Installation
+
+Fenic is a Python package that requires Python 3.10 or higher. It can be installed using pip or uv.
+
+## Quick Install
+
+<CodeGroup>
+```bash pip
+pip install fenic
+```
+
+```bash uv
+uv add fenic
+```
+</CodeGroup>
+
+## Python Version Requirements
+
+Fenic requires **Python 3.10, 3.11, or 3.12**. Verify your Python version:
+
+```bash
+python --version
+```
+
+<Note>
+  Python 3.13 is not yet supported. Make sure you're using Python 3.10-3.12.
+</Note>
+
+## Optional Provider Packages
+
+Fenic supports multiple AI providers. Install additional packages based on the providers you plan to use:
+
+<Tabs>
+  <Tab title="Anthropic">
+    ```bash
+    pip install "fenic[anthropic]"
+    ```
+    
+    Enables Claude models (Haiku, Sonnet, Opus)
+  </Tab>
+  
+  <Tab title="Google">
+    ```bash
+    pip install "fenic[google]"
+    ```
+    
+    Enables Gemini models (2.0/2.5 Flash) with local tokenizer support
+  </Tab>
+  
+  <Tab title="Cohere">
+    ```bash
+    pip install "fenic[cohere]"
+    ```
+    
+    Enables Cohere embeddings (embed-v4.0)
+  </Tab>
+  
+  <Tab title="Cloud">
+    ```bash
+    pip install "fenic[cloud]"
+    ```
+    
+    Enables distributed processing with Fenic Cloud
+  </Tab>
+  
+  <Tab title="MCP">
+    ```bash
+    pip install "fenic[mcp]"
+    ```
+    
+    Enables Model Context Protocol server capabilities
+  </Tab>
+</Tabs>
+
+### Install Multiple Providers
+
+You can install multiple provider packages at once:
+
+```bash
+pip install "fenic[anthropic,google,mcp]"
+```
+
+## API Keys Configuration
+
+Fenic requires API keys for the AI providers you use. Set them as environment variables:
+
+<CodeGroup>
+```bash OpenAI
+export OPENAI_API_KEY="sk-..."
+```
+
+```bash Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+```bash Google
+export GOOGLE_API_KEY="AIza..."
+```
+</CodeGroup>
+
+<Warning>
+  Never commit API keys to version control. Use environment variables or a secrets management system.
+</Warning>
+
+### Alternative: Use .env Files
+
+For local development, you can create a `.env` file:
+
+```bash .env
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=AIza...
+```
+
+Then load it in your Python code:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+
+import fenic as fc
+# API keys are now available to Fenic
+```
+
+<Note>
+  You'll need to install python-dotenv: `pip install python-dotenv`
+</Note>
+
+## Verify Installation
+
+Verify that Fenic is installed correctly:
+
+```python
+import fenic as fc
+
+print(fc.__version__)
+# Should print: 0.7.0 (or your installed version)
+```
+
+## Supported AI Providers
+
+Fenic integrates with multiple AI providers out of the box:
+
+### Language Models
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="openai">
+    - GPT-4, GPT-4o, GPT-5 series
+    - o1, o3 series (reasoning models)
+    - Fast and reliable
+  </Card>
+  
+  <Card title="Anthropic" icon="a">
+    - Claude 3.5 (Haiku, Sonnet, Opus)
+    - Claude 4 series
+    - Excellent for long contexts
+  </Card>
+  
+  <Card title="Google Gemini" icon="google">
+    - Gemini 2.0/2.5 Flash
+    - Thinking modes support
+    - Multimodal capabilities
+  </Card>
+  
+  <Card title="OpenRouter" icon="globe">
+    - Access to 200+ models
+    - Aggregator for multiple providers
+    - Flexible model selection
+  </Card>
+</CardGroup>
+
+### Embedding Models
+
+| Provider  | Models                           | Use Case                    |
+| --------- | -------------------------------- | --------------------------- |
+| OpenAI    | text-embedding-3-small/large     | General-purpose embeddings  |
+| Google    | Gemini embedding models          | Multimodal embeddings       |
+| Cohere    | embed-v4.0                       | Multi-language support      |
+
+## Core Dependencies
+
+Fenic automatically installs these core dependencies:
+
+- **polars** (1.20.0-1.30.0) — DataFrame operations
+- **duckdb** (≥1.1.3) — SQL engine
+- **lancedb** (0.22.0-0.25.0) — Vector storage
+- **openai** (≥1.101.0) — OpenAI API client
+- **tiktoken** (≥0.11.0) — Token counting
+- **pydantic** — Data validation
+- **jinja2** (≥3.1.6) — Template rendering
+- **pymupdf** (≥1.26.4) — PDF parsing
+
+<Note>
+  All dependencies are automatically managed. You don't need to install them separately.
+</Note>
+
+## Data Source Support
+
+Fenic can read from various data sources without additional installation:
+
+- **Local files**: PDF, Markdown, CSV, JSON, Parquet
+- **Cloud storage**: S3 (via boto3)
+- **In-memory**: Polars, Pandas, PyArrow DataFrames
+- **Datasets**: Hugging Face Datasets
+- **Databases**: DuckDB
+
+## Development Installation
+
+For contributors or those wanting to modify Fenic:
+
+```bash
+# Clone the repository
+git clone https://github.com/typedef-ai/fenic.git
+cd fenic
+
+# Install with development dependencies
+just setup
+```
+
+See the [Contributing Guide](https://github.com/typedef-ai/fenic/blob/main/CONTRIBUTING.md) for more details.
+
+## Troubleshooting
+
+### Import Error
+
+If you get an import error:
+
+```python
+ImportError: No module named 'fenic'
+```
+
+Make sure Fenic is installed in your active Python environment:
+
+```bash
+pip list | grep fenic
+```
+
+### API Key Not Found
+
+If you get an API key error:
+
+```
+Error: OPENAI_API_KEY not found
+```
+
+Verify the environment variable is set:
+
+```bash
+echo $OPENAI_API_KEY
+```
+
+### Version Conflicts
+
+If you experience dependency conflicts, create a fresh virtual environment:
+
+```bash
+python -m venv fenic-env
+source fenic-env/bin/activate  # On Windows: fenic-env\Scripts\activate
+pip install fenic
+```
+
+## Next Steps
+
+<Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+  Build your first context pipeline with Fenic
+</Card>

@@ -1,0 +1,627 @@
+---
+title: 'Model Configuration'
+description: 'Configuration options for language and embedding models'
+icon: 'microchip'
+---
+
+## Overview
+
+Fenic supports multiple LLM providers with provider-specific configuration options. Each model type has its own configuration class with rate limiting and provider-specific parameters.
+
+## Language Models
+
+### OpenAILanguageModel
+
+Configuration for OpenAI language models including GPT-4 and o-series reasoning models.
+
+```python
+from fenic.api.session.config import OpenAILanguageModel
+
+model = OpenAILanguageModel(
+    model_name="gpt-4.1-nano",
+    rpm=100,
+    tpm=1000,
+    profiles=None,
+    default_profile=None
+)
+```
+
+<ParamField path="model_name" type="OpenAILanguageModelName" required>
+  The name of the OpenAI model to use. Examples: `"gpt-4.1-nano"`, `"o4-mini"`, `"gpt-5.1"`
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="tpm" type="int" required>
+  Tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations. Allows the same model to be used with different settings.
+  
+  <Expandable title="OpenAI Profile Options">
+    <ParamField path="reasoning_effort" type="ReasoningEffort" optional>
+      Reasoning effort level for gpt5 and o-series models.
+      
+      Valid values: `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`
+      
+      - **gpt-5.1 models**: defaults to `"none"` (disabled reasoning), does NOT support `"minimal"`
+      - **gpt-5 models**: defaults to `"minimal"`, does NOT support `"none"`
+      - **o-series models**: defaults to `"low"`, does NOT support `"none"` or `"minimal"`
+    </ParamField>
+    
+    <ParamField path="verbosity" type="Verbosity" optional>
+      Verbosity level for gpt5/gpt5.1 models only.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+**Example with Profiles:**
+
+```python
+model = OpenAILanguageModel(
+    model_name="o4-mini",
+    rpm=100,
+    tpm=1000,
+    profiles={
+        "fast": OpenAILanguageModel.Profile(reasoning_effort="low"),
+        "thorough": OpenAILanguageModel.Profile(reasoning_effort="high"),
+    },
+    default_profile="fast",
+)
+```
+
+---
+
+### AnthropicLanguageModel
+
+Configuration for Anthropic Claude models with separate input/output token limits.
+
+```python
+from fenic.api.session.config import AnthropicLanguageModel
+
+model = AnthropicLanguageModel(
+    model_name="claude-3-5-haiku-latest",
+    rpm=100,
+    input_tpm=10000,
+    output_tpm=4000,
+    profiles=None,
+    default_profile=None
+)
+```
+
+<ParamField path="model_name" type="AnthropicLanguageModelName" required>
+  The name of the Anthropic model to use. Examples: `"claude-3-5-haiku-latest"`, `"claude-opus-4-0"`
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="input_tpm" type="int" required>
+  Input tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="output_tpm" type="int" required>
+  Output tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations.
+  
+  <Expandable title="Anthropic Profile Options">
+    <ParamField path="thinking_token_budget" type="int" optional>
+      Thinking budget in tokens. If not provided, thinking will be disabled for the profile.
+      
+      Minimum supported by Anthropic: 1024 tokens
+      
+      <Warning>
+        If `thinking_token_budget` is set, `temperature` cannot be customized.
+      </Warning>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+**Example with Thinking Profiles:**
+
+```python
+model = AnthropicLanguageModel(
+    model_name="claude-opus-4-0",
+    rpm=100,
+    input_tpm=10000,
+    output_tpm=4000,
+    profiles={
+        "thinking_disabled": AnthropicLanguageModel.Profile(),
+        "fast": AnthropicLanguageModel.Profile(thinking_token_budget=1024),
+        "thorough": AnthropicLanguageModel.Profile(thinking_token_budget=4096),
+    },
+    default_profile="fast",
+)
+```
+
+---
+
+### GoogleDeveloperLanguageModel
+
+Configuration for Gemini models accessible through Google Developer AI Studio (requires `GOOGLE_API_KEY`).
+
+```python
+from fenic.api.session.config import GoogleDeveloperLanguageModel
+
+model = GoogleDeveloperLanguageModel(
+    model_name="gemini-2.0-flash",
+    rpm=100,
+    tpm=10000,
+    profiles=None,
+    default_profile=None
+)
+```
+
+<ParamField path="model_name" type="GoogleDeveloperLanguageModelName" required>
+  The name of the Google Developer model to use. Examples: `"gemini-2.0-flash"`, `"gemini-2.5-flash"`, `"gemini-3.5-flash"`
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="tpm" type="int" required>
+  Tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations.
+  
+  <Expandable title="Google Profile Options">
+    <ParamField path="thinking_token_budget" type="int" optional>
+      **For gemini-2.5 and earlier models only.** Thinking budget in tokens.
+      
+      - If not provided or set to 0, thinking is disabled (not supported on gemini-2.5-pro)
+      - Set to -1 for automatic budget based on prompt complexity
+      - Range: -1 to 32767
+      
+      <Note>
+        Gemini models treat this as a suggestion, not a hard limit. Models may generate more thinking tokens than the budget.
+      </Note>
+    </ParamField>
+    
+    <ParamField path="thinking_level" type="ThinkingLevelType" optional>
+      **For gemini-3+ models only.** Set the thinking level.
+      
+      Options: `"high"`, `"medium"`, `"low"`, `"minimal"`
+      
+      Mutually exclusive with `thinking_token_budget`.
+    </ParamField>
+    
+    <ParamField path="media_resolution" type="MediaResolutionType" optional>
+      **For gemini-3+ models only.** Media resolution for PDF processing.
+      
+      Options: `"low"`, `"medium"`, `"high"`, `"ultra_high"`
+      
+      Affects token cost per page.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+**Example with Thinking Profiles (gemini-2.5):**
+
+```python
+model = GoogleDeveloperLanguageModel(
+    model_name="gemini-2.5-flash",
+    rpm=100,
+    tpm=10000,
+    profiles={
+        "thinking_disabled": GoogleDeveloperLanguageModel.Profile(),
+        "fast": GoogleDeveloperLanguageModel.Profile(thinking_token_budget=1024),
+        "auto": GoogleDeveloperLanguageModel.Profile(thinking_token_budget=-1),
+        "thorough": GoogleDeveloperLanguageModel.Profile(thinking_token_budget=8192),
+    },
+    default_profile="fast",
+)
+```
+
+**Example with Thinking Levels (gemini-3+):**
+
+```python
+model = GoogleDeveloperLanguageModel(
+    model_name="gemini-3.5-flash",
+    rpm=100,
+    tpm=10000,
+    profiles={
+        "minimal": GoogleDeveloperLanguageModel.Profile(thinking_level="minimal"),
+        "low": GoogleDeveloperLanguageModel.Profile(thinking_level="low"),
+        "high": GoogleDeveloperLanguageModel.Profile(thinking_level="high"),
+    },
+    default_profile="low",
+)
+```
+
+---
+
+### GoogleVertexLanguageModel
+
+Configuration for Gemini models accessible through Google Vertex AI (requires Google Cloud credentials).
+
+Has the same parameters and profile options as `GoogleDeveloperLanguageModel`.
+
+```python
+from fenic.api.session.config import GoogleVertexLanguageModel
+
+model = GoogleVertexLanguageModel(
+    model_name="gemini-2.0-flash",
+    rpm=100,
+    tpm=10000
+)
+```
+
+---
+
+### OpenRouterLanguageModel
+
+Configuration for OpenRouter language models with advanced provider routing (requires `OPENROUTER_API_KEY`).
+
+```python
+from fenic.api.session.config import OpenRouterLanguageModel
+
+model = OpenRouterLanguageModel(
+    model_name="anthropic/claude-3-5-sonnet",
+    profiles={...},
+    default_profile="default",
+    structured_output_strategy=None
+)
+```
+
+<ParamField path="model_name" type="str" required>
+  Model identifier in `{provider}/{model}` format. Example: `"anthropic/claude-3-5-sonnet"`
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations.
+  
+  <Expandable title="OpenRouter Profile Options">
+    <ParamField path="reasoning_effort" type="Literal['high', 'medium', 'low']" optional>
+      OpenAI-style reasoning effort. If the model supports reasoning but not `reasoning_effort`, a `reasoning_max_tokens` will be calculated.
+    </ParamField>
+    
+    <ParamField path="reasoning_max_tokens" type="int" optional>
+      Token budget for reasoning (for Anthropic, Gemini, etc.). If the model supports reasoning but not `reasoning_max_tokens`, a `reasoning_effort` will be calculated.
+    </ParamField>
+    
+    <ParamField path="models" type="list[str]" optional>
+      List of fallback models to use if the primary model is unavailable. Maximum 3 models.
+    </ParamField>
+    
+    <ParamField path="parsing_engine" type="ParsingEngine" optional>
+      Parsing engine for PDF files. Options: `"native"`, `"pdf-text"`, `"mistral-ocr"`
+      
+      By default, the model's native parsing engine is used. Note: `"mistral-ocr"` incurs additional costs.
+    </ParamField>
+    
+    <ParamField path="provider" type="Provider" optional>
+      Provider routing preferences.
+      
+      <Expandable title="Provider Routing Options">
+        <ParamField path="order" type="list[str]" optional>
+          List of providers to try in order. Example: `["Anthropic", "Amazon Bedrock"]`
+        </ParamField>
+        
+        <ParamField path="sort" type="ProviderSort" optional>
+          Provider routing preference:
+          - `"price"` - Route to cheapest provider first
+          - `"throughput"` - Route to highest throughput provider
+          - `"latency"` - Route to lowest latency provider
+        </ParamField>
+        
+        <ParamField path="quantizations" type="list[ModelQuantization]" optional>
+          Allowed quantizations. Example: `["bf16", "fp16"]`
+          
+          Note: Many providers report `"unknown"` quantization.
+        </ParamField>
+        
+        <ParamField path="data_collection" type="DataCollection" optional>
+          Data collection preference:
+          - `"allow"` - Allow providers that may store/train on prompts
+          - `"deny"` - Only use providers that don't collect data
+        </ParamField>
+        
+        <ParamField path="only" type="list[str]" optional>
+          Only include these providers when routing. Example: `["Anthropic"]`
+        </ParamField>
+        
+        <ParamField path="ignore" type="list[str]" optional>
+          Exclude these providers when routing.
+        </ParamField>
+        
+        <ParamField path="max_prompt_price" type="float" optional>
+          Maximum prompt price ($USD per 1M tokens).
+        </ParamField>
+        
+        <ParamField path="max_completion_price" type="float" optional>
+          Maximum completion price ($USD per 1M tokens).
+        </ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+<ParamField path="structured_output_strategy" type="StructuredOutputStrategy" optional>
+  Strategy for structured output if model supports both tool calling and structured outputs:
+  - `"prefer_tools"` - Prefer using tools over response format
+  - `"prefer_response_format"` - Prefer using response format over tools
+</ParamField>
+
+**Example with Provider Routing:**
+
+```python
+model = OpenRouterLanguageModel(
+    model_name="anthropic/claude-sonnet-4-0-latest",
+    profiles={
+        "default": OpenRouterLanguageModel.Profile(
+            provider=OpenRouterLanguageModel.Provider(
+                only=["Anthropic"],  # Only route to Anthropic, not AWS/GCP
+                sort="price"
+            )
+        )
+    },
+)
+```
+
+**Example with Throughput Optimization:**
+
+```python
+model = OpenRouterLanguageModel(
+    model_name="qwen/qwen3-next-80b-a3b-instruct",
+    profiles={
+        "default": OpenRouterLanguageModel.Profile(
+            provider=OpenRouterLanguageModel.Provider(
+                sort="throughput",
+                data_collection="deny",
+                quantizations=["bf16"]  # Only bf16, no fp8
+            )
+        )
+    },
+)
+```
+
+---
+
+## Embedding Models
+
+### OpenAIEmbeddingModel
+
+Configuration for OpenAI embedding models.
+
+```python
+from fenic.api.session.config import OpenAIEmbeddingModel
+
+model = OpenAIEmbeddingModel(
+    model_name="text-embedding-3-small",
+    rpm=100,
+    tpm=1000
+)
+```
+
+<ParamField path="model_name" type="OpenAIEmbeddingModelName" required>
+  The name of the OpenAI embedding model. Examples: `"text-embedding-3-small"`, `"text-embedding-3-large"`
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="tpm" type="int" required>
+  Tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+---
+
+### GoogleDeveloperEmbeddingModel
+
+Configuration for Google embedding models via Developer AI Studio.
+
+```python
+from fenic.api.session.config import GoogleDeveloperEmbeddingModel
+
+model = GoogleDeveloperEmbeddingModel(
+    model_name="gemini-embedding-001",
+    rpm=100,
+    tpm=10000,
+    profiles=None,
+    default_profile=None
+)
+```
+
+<ParamField path="model_name" type="GoogleDeveloperEmbeddingModelName" required>
+  The name of the Google Developer embedding model.
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="tpm" type="int" required>
+  Tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations.
+  
+  <Expandable title="Profile Options">
+    <ParamField path="output_dimensionality" type="int" optional>
+      Dimensionality of the embedding output. Range: 1 to 3072.
+      
+      If not provided, uses the model's default dimensionality.
+    </ParamField>
+    
+    <ParamField path="task_type" type="GoogleEmbeddingTaskType" default="SEMANTIC_SIMILARITY">
+      Type of task for the embedding model.
+      
+      Options:
+      - `"SEMANTIC_SIMILARITY"`
+      - `"CLASSIFICATION"`
+      - `"CLUSTERING"`
+      - `"RETRIEVAL_DOCUMENT"`
+      - `"RETRIEVAL_QUERY"`
+      - `"CODE_RETRIEVAL_QUERY"`
+      - `"QUESTION_ANSWERING"`
+      - `"FACT_VERIFICATION"`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+**Example with Profiles:**
+
+```python
+model = GoogleDeveloperEmbeddingModel(
+    model_name="gemini-embedding-001",
+    rpm=100,
+    tpm=10000,
+    profiles={
+        "default": GoogleDeveloperEmbeddingModel.Profile(),
+        "high_dim": GoogleDeveloperEmbeddingModel.Profile(
+            output_dimensionality=3072
+        ),
+        "retrieval": GoogleDeveloperEmbeddingModel.Profile(
+            output_dimensionality=1536,
+            task_type="RETRIEVAL_DOCUMENT"
+        ),
+    },
+    default_profile="default",
+)
+```
+
+---
+
+### GoogleVertexEmbeddingModel
+
+Configuration for Google embedding models via Vertex AI.
+
+Has the same parameters and profile options as `GoogleDeveloperEmbeddingModel`, but with a minimum `output_dimensionality` of 768.
+
+```python
+from fenic.api.session.config import GoogleVertexEmbeddingModel
+
+model = GoogleVertexEmbeddingModel(
+    model_name="gemini-embedding-001",
+    rpm=100,
+    tpm=10000
+)
+```
+
+---
+
+### CohereEmbeddingModel
+
+Configuration for Cohere embedding models.
+
+```python
+from fenic.api.session.config import CohereEmbeddingModel
+
+model = CohereEmbeddingModel(
+    model_name="embed-v4.0",
+    rpm=100,
+    tpm=50000,
+    profiles=None,
+    default_profile=None
+)
+```
+
+<ParamField path="model_name" type="CohereEmbeddingModelName" required>
+  The name of the Cohere embedding model.
+</ParamField>
+
+<ParamField path="rpm" type="int" required>
+  Requests per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="tpm" type="int" required>
+  Tokens per minute limit. Must be greater than 0.
+</ParamField>
+
+<ParamField path="profiles" type="dict[str, Profile]" optional>
+  Optional mapping of profile names to profile configurations.
+  
+  <Expandable title="Profile Options">
+    <ParamField path="output_dimensionality" type="int" optional>
+      Dimensionality of the embedding output. Range: 1 to 1536.
+      
+      If not provided, uses the model's default dimensionality.
+    </ParamField>
+    
+    <ParamField path="input_type" type="CohereEmbeddingTaskType" default="search_document">
+      Type of input text.
+      
+      Options:
+      - `"search_document"`
+      - `"search_query"`
+      - `"classification"`
+      - `"clustering"`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="default_profile" type="str" optional>
+  The name of the default profile to use if profiles are configured.
+</ParamField>
+
+**Example with Profiles:**
+
+```python
+model = CohereEmbeddingModel(
+    model_name="embed-v4.0",
+    rpm=100,
+    tpm=50000,
+    profiles={
+        "high_dim": CohereEmbeddingModel.Profile(
+            output_dimensionality=1536,
+            input_type="search_document"
+        ),
+        "classification": CohereEmbeddingModel.Profile(
+            output_dimensionality=1024,
+            input_type="classification"
+        ),
+    },
+    default_profile="high_dim",
+)
+```
+
+---
+
+## Environment Variables
+
+Each model provider requires specific environment variables:
+
+- **OpenAI**: `OPENAI_API_KEY`
+- **Anthropic**: `ANTHROPIC_API_KEY`
+- **Google Developer**: `GOOGLE_API_KEY`
+- **Google Vertex**: Google Cloud credentials (ADC or service account)
+- **OpenRouter**: `OPENROUTER_API_KEY`
+- **Cohere**: `COHERE_API_KEY`
+
+## Related
+
+- [SessionConfig](/api/session-config) - Complete session configuration
+- [SemanticConfig](/api/semantic-config) - Semantic model configuration
+- [LLM Providers Integration](/integrations/llm-providers) - Provider setup guide

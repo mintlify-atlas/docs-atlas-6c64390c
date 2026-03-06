@@ -1,0 +1,381 @@
+---
+title: 'JSON Processing'
+description: 'Process complex nested JSON with JQ integration, type casting, and hybrid DataFrame analytics'
+icon: 'brackets-curly'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/json_processing/json_processing.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Comprehensive JSON processing using Fenic's JSON type system and JQ integration. This example processes whisper transcription data and transforms it into multiple structured DataFrames for analysis.
+
+## What This Example Shows
+
+### Core JSON Processing Features
+
+<CardGroup cols={2}>
+  <Card title="JSON Type Casting" icon="wand-magic-sparkles">
+    Loading string data and converting to Fenic's JsonType.
+  </Card>
+  <Card title="JQ Integration" icon="code">
+    Complex queries for nested data extraction and aggregation.
+  </Card>
+  <Card title="Array Operations" icon="list">
+    Processing nested arrays and extracting scalar values.
+  </Card>
+  <Card title="Type Conversion" icon="shuffle">
+    Converting JSON data to appropriate DataFrame types.
+  </Card>
+  <Card title="Hybrid Processing" icon="layer-group">
+    Combining JSON-native operations with traditional DataFrame analytics.
+  </Card>
+  <Card title="Struct Casting" icon="table">
+    Efficient field extraction using schema definitions.
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+The input JSON contains whisper transcription data:
+
+```json
+{
+  "language": "en",
+  "segments": [
+    {
+      "text": "Let me ask you about AI.",
+      "start": 2.94,
+      "end": 4.48,
+      "words": [
+        {
+          "word": " Let",
+          "start": 2.94,
+          "end": 3.12,
+          "speaker": "SPEAKER_01",
+          "probability": 0.69384765625
+        }
+        // ... more words
+      ]
+    }
+    // ... more segments
+  ]
+}
+```
+
+## Output DataFrames
+
+The pipeline creates three complementary DataFrames:
+
+### 1. Words DataFrame (Granular Analysis)
+
+**Purpose**: Individual word-level analysis with timing and confidence
+
+Fields:
+- `word_text`: The spoken word
+- `speaker`: Speaker identifier
+- `start_time`, `end_time`: Word timing in seconds
+- `duration`: Calculated word duration
+- `probability`: Speech recognition confidence score
+
+### 2. Segments DataFrame (Content Analysis)
+
+**Purpose**: Conversation segments with aggregated metrics
+
+Fields:
+- `segment_text`: Full text of conversation segment
+- `start_time`, `end_time`, `duration`: Segment timing
+- `word_count`: Number of words in segment
+- `average_confidence`: Average recognition confidence
+
+### 3. Speaker Summary DataFrame (Analytics)
+
+**Purpose**: High-level speaker analytics and patterns
+
+Fields:
+- `speaker`: Speaker identifier
+- `total_words`: Total words spoken
+- `total_speaking_time`: Total time speaking
+- `average_confidence`: Overall speech quality
+- `word_rate`: Words per minute
+
+## Implementation
+
+### Session Configuration
+
+```python
+import fenic as fc
+from pathlib import Path
+
+config = fc.SessionConfig(app_name="json_processing")
+session = fc.Session.get_or_create(config)
+```
+
+### Load and Cast JSON Data
+
+```python
+# Read JSON file as string
+transcript_path = Path(__file__).parent / "whisper-transcript.json"
+with open(transcript_path, "r") as f:
+    json_content = f.read()
+
+# Create dataframe with JSON string
+df = session.create_dataframe([{"json_string": json_content}])
+
+# Cast the JSON string to JSON type
+df_json = df.select(
+    fc.col("json_string").cast(fc.JsonType).alias("json_data")
+)
+
+print("JSON data cast to JSON type:")
+df_json.show(1)
+```
+
+<Info>
+Casting to `JsonType` enables JSON-specific operations like JQ queries and structured extraction.
+</Info>
+
+### Create Words DataFrame
+
+#### Using JQ for Extraction
+
+```python
+# Extract all words from all segments using JQ
+words_df = df_json.select(
+    fc.json.jq(
+        fc.col("json_data"),
+        # JQ query with variable binding
+        '.segments[] as $seg | $seg.words[] | {word: .word, speaker: .speaker, start: .start, end: .end, probability: .probability, segment_start: $seg.start}'
+    ).alias("word_data")
+).explode("word_data")  # Convert array to rows
+
+print(f"Extracted {words_df.count()} individual words")
+```
+
+#### Using Struct Casting (Recommended)
+
+```python
+# Define schema for word-level data
+word_schema = fc.StructType([
+    fc.StructField("word", fc.StringType),
+    fc.StructField("speaker", fc.StringType),
+    fc.StructField("start", fc.FloatType),
+    fc.StructField("end", fc.FloatType),
+    fc.StructField("probability", fc.FloatType),
+    fc.StructField("segment_start", fc.FloatType),
+    fc.StructField("segment_end", fc.FloatType)
+])
+
+# Cast to struct and unnest - more efficient than JQ + get_item(0)
+words_clean_df = words_df.select(
+    fc.col("word_data").cast(word_schema).alias("word_struct")
+).unnest("word_struct").select(
+    fc.col("word").alias("word_text"),
+    fc.col("speaker"),
+    fc.col("start").alias("start_time"),
+    fc.col("end").alias("end_time"),
+    fc.col("probability")
+)
+
+# Add calculated fields
+words_final_df = words_clean_df.select(
+    "*",
+    (fc.col("end_time") - fc.col("start_time")).alias("duration")
+)
+
+print("Words DataFrame:")
+words_final_df.show(10)
+```
+
+<Note>
+**Struct casting + unnest** is more efficient than multiple JQ queries for simple field extraction.
+</Note>
+
+### Create Segments DataFrame
+
+#### Hybrid Approach: Struct Casting + JQ
+
+```python
+# Extract segments using JQ
+segments_df = df_json.select(
+    fc.json.jq(
+        fc.col("json_data"),
+        '.segments[] | {text: .text, start: .start, end: .end, words: .words}'
+    ).alias("segment_data")
+).explode("segment_data")
+
+# Define schema for basic segment fields
+segment_basic_schema = fc.StructType([
+    fc.StructField("text", fc.StringType),
+    fc.StructField("start", fc.FloatType),
+    fc.StructField("end", fc.FloatType)
+])
+
+# Extract basic fields with struct casting, complex aggregations with JQ
+segments_clean_df = segments_df.select(
+    # Struct casting for basic fields (efficient)
+    fc.col("segment_data").cast(segment_basic_schema).alias("segment_struct"),
+    # JQ for array aggregations (best tool for this)
+    fc.json.jq(fc.col("segment_data"), '.words | length').get_item(0).cast(fc.IntegerType).alias("word_count"),
+    fc.json.jq(fc.col("segment_data"), '[.words[].probability] | add / length').get_item(0).cast(fc.FloatType).alias("average_confidence")
+).unnest("segment_struct").select(
+    fc.col("text").alias("segment_text"),
+    fc.col("start").alias("start_time"),
+    fc.col("end").alias("end_time"),
+    fc.col("word_count"),
+    fc.col("average_confidence")
+).select(
+    "segment_text",
+    "start_time",
+    "end_time",
+    (fc.col("end_time") - fc.col("start_time")).alias("duration"),
+    "word_count",
+    "average_confidence"
+)
+
+print("Segments DataFrame:")
+segments_clean_df.show(5)
+```
+
+### Create Speaker Summary DataFrame
+
+```python
+# Use traditional DataFrame aggregations on JSON-extracted data
+speaker_summary_df = words_final_df.group_by("speaker").agg(
+    fc.count("*").alias("total_words"),
+    fc.avg("probability").alias("average_confidence"),
+    fc.min("start_time").alias("first_speaking_time"),
+    fc.max("end_time").alias("last_speaking_time"),
+    fc.sum("duration").alias("total_speaking_time")
+).select(
+    "speaker",
+    "total_words",
+    "total_speaking_time",
+    "average_confidence",
+    "first_speaking_time",
+    "last_speaking_time",
+    # Calculate words per minute
+    (fc.col("total_words") / (fc.col("total_speaking_time") / 60.0)).alias("word_rate")
+)
+
+print("Speaker Summary:")
+speaker_summary_df.show()
+```
+
+## Data Extraction Approaches
+
+### When to Use Struct Casting
+
+**Best for**: Simple field extraction
+
+```python
+# Define schema
+schema = fc.StructType([
+    fc.StructField("word", fc.StringType),
+    fc.StructField("start", fc.FloatType),
+])
+
+# Cast and unnest
+df.select(
+    fc.col("data").cast(schema).alias("struct")
+).unnest("struct")
+```
+
+**Benefits**:
+- More efficient than multiple JQ queries
+- Automatic type handling
+- Single operation extracts all fields
+
+### When to Use JQ Queries
+
+**Best for**: Complex operations
+
+```jq
+# Nested traversal with variable binding
+'.segments[] as $seg | $seg.words[] | {...}'
+
+# Array length calculation
+'.words | length'
+
+# Array aggregation for averages
+'[.words[].probability] | add / length'
+```
+
+**Use JQ for**:
+- Array aggregations (`length`, `add / length`)
+- Complex transformations
+- Variable binding and nested operations
+- Mathematical operations within queries
+
+## JQ Query Complexity Levels
+
+<AccordionGroup>
+  <Accordion title="Simple Field Extraction">
+    ```jq
+    .field
+    .nested.field
+    ```
+  </Accordion>
+  
+  <Accordion title="Array Traversal">
+    ```jq
+    .segments[]
+    .segments[].words[]
+    ```
+  </Accordion>
+  
+  <Accordion title="Variable Binding">
+    ```jq
+    .segments[] as $seg | $seg.words[]
+    ```
+  </Accordion>
+  
+  <Accordion title="Array Operations">
+    ```jq
+    .words | length
+    [.words[].probability] | add / length
+    ```
+  </Accordion>
+  
+  <Accordion title="Object Construction">
+    ```jq
+    {word: .word, segment_start: $seg.start}
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Running the Example
+
+```bash
+python json_processing.py
+```
+
+## Expected Output
+
+The script displays:
+
+1. Raw JSON data loading and casting
+2. Word-level extraction (~4000+ individual words)
+3. Segment-level analysis (conversation segments)
+4. Speaker summary analytics (2 speakers with statistics)
+5. Comprehensive pipeline summary
+
+## Learning Outcomes
+
+After studying this example, you'll understand:
+
+1. **How to load and cast JSON data** in Fenic
+2. **Struct casting + unnest** for efficient field extraction
+3. **Complex JQ queries** for advanced data manipulation
+4. **When to choose** struct casting vs JQ
+5. **Array processing** and aggregation within JSON
+6. **Type conversion** between JSON and DataFrame types
+7. **Hybrid workflows** combining multiple extraction approaches
+8. **Performance optimization** for JSON processing pipelines
+9. **Real-world data processing** patterns for audio/transcript analysis
+
+<Tip>
+Use struct casting for simple field extraction and JQ for complex aggregations and transformations. Combine both approaches for optimal performance.
+</Tip>

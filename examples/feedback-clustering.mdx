@@ -1,0 +1,370 @@
+---
+title: 'Customer Feedback Clustering'
+description: 'Automatically cluster customer feedback into themes and generate intelligent summaries using semantic operations'
+icon: 'comments'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/feedback_clustering/feedback_clustering.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+Use Fenic's `semantic.with_cluster_labels()` and `semantic.reduce()` to automatically cluster customer feedback into themes and generate intelligent summaries for each discovered category.
+
+## Overview
+
+Customer feedback analysis is a critical business process that traditionally requires manual categorization. This example shows how semantic clustering can automatically:
+
+- **Discover hidden themes** in unstructured feedback without predefined categories
+- **Group similar feedback** based on semantic meaning rather than keywords
+- **Generate actionable insights** for each theme using AI-powered summarization
+- **Prioritize issues** based on sentiment and frequency
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Semantic Clustering" icon="diagram-project">
+    Using `semantic.with_cluster_labels()` for embedding-based clustering.
+  </Card>
+  <Card title="AI Summarization" icon="sparkles">
+    Using `semantic.reduce()` for intelligent theme analysis.
+  </Card>
+  <Card title="Automatic Theme Discovery" icon="magnifying-glass">
+    No manual categorization required - themes emerge from data.
+  </Card>
+  <Card title="Business Intelligence" icon="chart-line">
+    Actionable insights for product teams with priority rankings.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+<Steps>
+  <Step title="Data Preparation">
+    Load customer feedback with ratings and metadata.
+  </Step>
+  
+  <Step title="Embedding Creation">
+    Generate semantic embeddings from feedback text.
+  </Step>
+  
+  <Step title="Semantic Clustering & Summarization">
+    Use both operations together in a single aggregation to discover themes and generate summaries.
+  </Step>
+</Steps>
+
+## Implementation
+
+### Session Configuration
+
+```python
+import fenic as fc
+
+config = fc.SessionConfig(
+    app_name="feedback_clustering",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "mini": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000,
+            )
+        },
+        embedding_models={
+            "small": fc.OpenAIEmbeddingModel(
+                model_name="text-embedding-3-small",
+                rpm=3000,
+                tpm=1_000_000
+            )
+        }
+    ),
+)
+
+session = fc.Session.get_or_create(config)
+```
+
+<Info>
+This example requires both a language model (for summarization) and an embedding model (for clustering).
+</Info>
+
+### Sample Data
+
+```python
+feedback_data = [
+    {
+        "feedback_id": "fb_001",
+        "customer_name": "Alice Johnson",
+        "feedback": "The mobile app crashes every time I try to upload a photo. Very frustrating experience!",
+        "rating": 1,
+        "timestamp": "2024-01-15"
+    },
+    {
+        "feedback_id": "fb_002",
+        "customer_name": "Bob Smith",
+        "feedback": "Love the new dark mode feature! Much easier on the eyes during night time use.",
+        "rating": 5,
+        "timestamp": "2024-01-16"
+    },
+    {
+        "feedback_id": "fb_003",
+        "customer_name": "Carol Davis",
+        "feedback": "The app is way too slow when loading my dashboard. Takes over 30 seconds every time.",
+        "rating": 2,
+        "timestamp": "2024-01-17"
+    },
+    # ... more feedback entries
+]
+
+feedback_df = session.create_dataframe(feedback_data)
+
+print(f"Loaded {feedback_df.count()} customer feedback entries")
+feedback_df.select("customer_name", "feedback", "rating").show()
+```
+
+### Create Embeddings
+
+```python
+# Generate embeddings from feedback text
+feedback_with_embeddings = feedback_df.select(
+    "*",
+    fc.semantic.embed(fc.col("feedback")).alias("feedback_embeddings")
+)
+
+print("Embeddings created successfully!")
+```
+
+### Cluster and Summarize
+
+```python
+# Cluster feedback into semantic themes and generate summaries
+feedback_clusters = feedback_with_embeddings.semantic.with_cluster_labels(
+    fc.col("feedback_embeddings"),
+    4  # Number of clusters - expecting themes like bugs, performance, features, praise
+).group_by(
+    "cluster_label"
+).agg(
+    fc.count("*").alias("feedback_count"),
+    fc.avg("rating").alias("avg_rating"),
+    fc.collect_list("customer_name").alias("customer_names"),
+    fc.semantic.reduce(
+        (
+            "Analyze this cluster of customer feedback and provide a concise summary of the main theme, "
+            "common issues, and sentiment."
+        ),
+        column=fc.col("feedback")
+    ).alias("theme_summary")
+)
+
+print("Theme Analysis Results:")
+feedback_clusters.select(
+    "cluster_label",
+    "feedback_count",
+    "avg_rating",
+    "theme_summary"
+).sort("cluster_label").show()
+```
+
+<Note>
+`semantic.reduce()` is used as an aggregation function to summarize multiple feedback entries into a coherent theme description.
+</Note>
+
+## Sample Results
+
+The system automatically discovered these themes from 12 feedback entries:
+
+### Cluster 0: Positive Features & Support (4.75★)
+
+**Theme**: Praise for specific features and excellent customer support
+
+**Key Points**:
+- Dark mode feature highly appreciated
+- Helpful support team
+- Effective search functionality
+
+**Sentiment**: Predominantly positive with some feature enhancement requests
+
+### Cluster 1: UI/UX Design Issues (2.0★)
+
+**Theme**: Design consistency and professional appearance concerns
+
+**Key Points**:
+- Inconsistent button layouts across screens
+- Unprofessional appearance
+
+**Sentiment**: Negative due to poor user experience
+
+### Cluster 2: Technical Performance Problems (1.75★)
+
+**Theme**: Critical technical issues affecting core functionality
+
+**Key Points**:
+- App crashes during photo uploads
+- Slow loading times (30+ seconds)
+- Frequent freezes
+
+**Sentiment**: Very negative with high frustration levels
+
+### Cluster 3: Usability & Feature Gaps (2.0★)
+
+**Theme**: Process complexity and missing functionality
+
+**Key Points**:
+- Confusing checkout process
+- Need for offline mode
+- Excel export capability requested
+
+**Sentiment**: Negative about functionality limitations
+
+## Business Value
+
+### Automated Insights
+
+<CardGroup cols={3}>
+  <Card title="No Manual Work" icon="wand-magic-sparkles">
+    Identifies themes without manual categorization.
+  </Card>
+  <Card title="Consistent Analysis" icon="check">
+    Provides uniform analysis across all feedback.
+  </Card>
+  <Card title="Scales Effortlessly" icon="arrow-up-right-dots">
+    Handles thousands of feedback entries.
+  </Card>
+</CardGroup>
+
+### Actionable Intelligence
+
+**Priority 1**: Fix technical crashes and performance (Cluster 2)
+- Highest impact on user satisfaction
+- Critical functionality issues
+- Lowest average rating (1.75★)
+
+**Priority 2**: Improve design consistency (Cluster 1)
+- Affects professional brand perception
+- Relatively quick wins
+
+**Priority 3**: Simplify user workflows (Cluster 3)
+- Add requested features (offline mode, Excel export)
+- Reduce checkout complexity
+
+**Maintain**: Continue excellent support and features (Cluster 0)
+- Highest satisfaction area (4.75★)
+- Model for other areas
+
+### Resource Optimization
+
+- Reduces manual analysis time from hours to minutes
+- Enables real-time feedback monitoring
+- Focuses development efforts on highest-impact issues
+
+## Use Cases
+
+<Tabs>
+  <Tab title="Product Development">
+    - Identify most requested features
+    - Understand user pain points
+    - Prioritize bug fixes and improvements
+  </Tab>
+  
+  <Tab title="Customer Success">
+    - Monitor satisfaction trends
+    - Identify at-risk customer segments
+    - Improve support processes
+  </Tab>
+  
+  <Tab title="Marketing Intelligence">
+    - Understand customer sentiment
+    - Identify product strengths for messaging
+    - Track competitive advantages
+  </Tab>
+</Tabs>
+
+## Key Operations
+
+### semantic.with_cluster_labels()
+
+```python
+df.semantic.with_cluster_labels(
+    embedding_column,
+    num_clusters
+)
+```
+
+- Uses K-means clustering on embedding vectors
+- Assigns `cluster_label` to each row
+- Returns DataFrame with added cluster column
+
+### semantic.reduce()
+
+```python
+fc.semantic.reduce(
+    instruction,
+    column=fc.col("text_column")
+)
+```
+
+- Aggregation function that summarizes multiple texts
+- Uses LLM to analyze and synthesize insights
+- Generates human-readable theme descriptions
+
+## Running the Example
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="your-api-key"
+
+# Run the clustering analysis
+python feedback_clustering.py
+```
+
+## Expected Output
+
+The script displays:
+
+1. **Raw Feedback Data**: Customer names, feedback text, and ratings
+2. **Clustering Progress**: Embedding generation and clustering status
+3. **Theme Analysis**: Detailed summaries for each discovered cluster
+4. **Business Insights**: Actionable themes ranked by priority
+
+## Advanced Usage
+
+### Adjusting Cluster Count
+
+```python
+# Experiment with different numbers of clusters
+for num_clusters in [3, 4, 5]:
+    clusters = df.semantic.with_cluster_labels(
+        fc.col("embeddings"),
+        num_clusters
+    )
+    # Evaluate cluster quality
+```
+
+### Custom Summarization Prompts
+
+```python
+fc.semantic.reduce(
+    (
+        "For this cluster of feedback about {{product_name}}, "
+        "identify: 1) Main theme, 2) Specific issues, 3) Suggested fixes, "
+        "4) Impact on business metrics"
+    ),
+    column=fc.col("feedback"),
+    group_context={
+        "product_name": fc.col("product")
+    }
+)
+```
+
+## Learning Outcomes
+
+This example teaches:
+
+- How to combine embedding-based clustering with AI summarization
+- When to use semantic operations for business intelligence
+- Patterns for automated text analysis and insight generation
+- Integration of multiple semantic operations in data pipelines
+
+<Tip>
+Start with 3-5 clusters for initial analysis, then adjust based on the coherence of discovered themes.
+</Tip>

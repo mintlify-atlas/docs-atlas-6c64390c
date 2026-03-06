@@ -1,0 +1,442 @@
+---
+title: Data Types
+description: Core data types for defining DataFrame schemas and operations
+---
+
+Fenic provides a comprehensive type system for working with structured and unstructured data. All data types inherit from the base `DataType` class.
+
+## Primitive Types
+
+Primitive types represent basic scalar values and are the building blocks for more complex types.
+
+### StringType
+
+Represents a UTF-8 encoded string value.
+
+```python
+import fenic as fc
+from fenic import StringType
+
+# Use in schema
+schema = fc.Schema([
+    fc.ColumnField("name", StringType)
+])
+
+# Cast column to string
+df = df.select(fc.col("value").cast(StringType))
+```
+
+### IntegerType
+
+Represents a signed integer value.
+
+```python
+from fenic import IntegerType
+
+schema = fc.Schema([
+    fc.ColumnField("id", IntegerType)
+])
+```
+
+### FloatType
+
+Represents a 32-bit floating-point number.
+
+```python
+from fenic import FloatType
+
+schema = fc.Schema([
+    fc.ColumnField("score", FloatType)
+])
+```
+
+### DoubleType
+
+Represents a 64-bit floating-point number.
+
+```python
+from fenic import DoubleType
+
+schema = fc.Schema([
+    fc.ColumnField("precise_value", DoubleType)
+])
+```
+
+### BooleanType
+
+Represents a boolean value (True/False).
+
+```python
+from fenic import BooleanType
+
+schema = fc.Schema([
+    fc.ColumnField("is_active", BooleanType)
+])
+```
+
+### DateType
+
+Represents a date value.
+
+```python
+from fenic import DateType
+
+schema = fc.Schema([
+    fc.ColumnField("birth_date", DateType)
+])
+```
+
+### TimestampType
+
+Represents a timestamp value.
+
+```python
+from fenic import TimestampType
+
+schema = fc.Schema([
+    fc.ColumnField("created_at", TimestampType)
+])
+```
+
+---
+
+## Composite Types
+
+Composite types represent structured collections of values.
+
+### ArrayType
+
+Represents a homogeneous variable-length array (list) of elements.
+
+<ParamField path="element_type" type="DataType" required>
+  The data type of each element in the array.
+</ParamField>
+
+#### Examples
+
+<CodeGroup>
+```python Array of strings
+from fenic import ArrayType, StringType
+
+schema = fc.Schema([
+    fc.ColumnField("tags", ArrayType(StringType))
+])
+```
+
+```python Array of integers
+from fenic import ArrayType, IntegerType
+
+schema = fc.Schema([
+    fc.ColumnField("scores", ArrayType(IntegerType))
+])
+```
+
+```python Nested arrays
+from fenic import ArrayType, IntegerType
+
+# Array of arrays of integers
+schema = fc.Schema([
+    fc.ColumnField("matrix", ArrayType(ArrayType(IntegerType)))
+])
+```
+</CodeGroup>
+
+### StructType
+
+Represents a struct (record) with named fields. Each field can have a different data type.
+
+<ParamField path="struct_fields" type="List[StructField]" required>
+  List of field definitions. Each field specifies a name and data type.
+</ParamField>
+
+#### StructField
+
+Defines a single field in a struct.
+
+<ParamField path="name" type="str" required>
+  The name of the field.
+</ParamField>
+
+<ParamField path="data_type" type="DataType" required>
+  The data type of the field.
+</ParamField>
+
+#### Examples
+
+<CodeGroup>
+```python Basic struct
+from fenic import StructType, StructField, StringType, IntegerType
+
+schema = fc.Schema([
+    fc.ColumnField("person", StructType([
+        StructField("name", StringType),
+        StructField("age", IntegerType),
+    ]))
+])
+```
+
+```python Nested struct
+from fenic import StructType, StructField, StringType, IntegerType
+
+schema = fc.Schema([
+    fc.ColumnField("employee", StructType([
+        StructField("name", StringType),
+        StructField("address", StructType([
+            StructField("street", StringType),
+            StructField("city", StringType),
+            StructField("zip", IntegerType),
+        ])),
+    ]))
+])
+```
+
+```python Using with unnest
+df = session.create_dataframe([{
+    "person": {"name": "Alice", "age": 30}
+}])
+
+# Unnest the struct to flatten fields
+df = df.unnest("person")
+df.show()
+# Output:
+# | name  | age |
+# |-------|-----|
+# | Alice | 30  |
+```
+</CodeGroup>
+
+---
+
+## Specialized Types
+
+Specialized types provide semantic meaning and enable type-specific operations.
+
+### MarkdownType
+
+Represents a string containing Markdown-formatted text. Enables markdown-specific functions.
+
+```python
+import fenic as fc
+from fenic import MarkdownType
+
+# Cast to MarkdownType to use markdown functions
+df = df.select(fc.col("content").cast(MarkdownType).alias("markdown"))
+
+# Use markdown-specific functions
+toc_df = df.select(
+    fc.markdown.generate_toc(fc.col("markdown")).alias("toc")
+)
+
+sections_df = df.select(
+    fc.markdown.extract_header_chunks(
+        fc.col("markdown"), 
+        header_level=2
+    ).alias("sections")
+).explode("sections")
+```
+
+### JsonType
+
+Represents a string containing JSON data. Enables JSON-specific functions.
+
+```python
+import fenic as fc
+from fenic import JsonType
+
+# Cast to JsonType to use JSON functions
+df = df.select(fc.col("json_string").cast(JsonType).alias("json_data"))
+
+# Use jq to extract data
+df = df.select(
+    fc.json.jq(
+        fc.col("json_data"),
+        '.users[] | {name: .name, email: .email}'
+    ).alias("user")
+).explode("user")
+```
+
+### HtmlType
+
+Represents a string containing raw HTML markup.
+
+```python
+from fenic import HtmlType
+
+df = df.select(fc.col("content").cast(HtmlType).alias("html"))
+```
+
+### TranscriptType
+
+Represents a string containing a transcript in a specific format.
+
+<ParamField path="format" type="'generic' | 'srt' | 'webvtt'" required>
+  The transcript format.
+</ParamField>
+
+```python
+from fenic import TranscriptType
+
+# Generic transcript format
+df = df.select(
+    fc.col("content").cast(TranscriptType(format="generic")).alias("transcript")
+)
+
+# SRT subtitle format
+df = df.select(
+    fc.col("content").cast(TranscriptType(format="srt")).alias("transcript")
+)
+
+# WebVTT format
+df = df.select(
+    fc.col("content").cast(TranscriptType(format="webvtt")).alias("transcript")
+)
+```
+
+### DocumentPathType
+
+Represents a string containing a document's local (file system) or remote (URL) path.
+
+<ParamField path="format" type="'pdf'" default="'pdf'">
+  The document format. Currently only supports PDF.
+</ParamField>
+
+```python
+from fenic import DocumentPathType
+
+df = df.select(
+    fc.col("file_path").cast(DocumentPathType(format="pdf")).alias("pdf_path")
+)
+```
+
+### EmbeddingType
+
+Represents a fixed-length embedding vector generated by a specific model.
+
+<ParamField path="dimensions" type="int" required>
+  The number of dimensions in the embedding vector.
+</ParamField>
+
+<ParamField path="embedding_model" type="str" required>
+  Name of the model used to generate the embedding.
+</ParamField>
+
+#### Examples
+
+<CodeGroup>
+```python OpenAI embeddings
+from fenic import EmbeddingType
+
+# text-embedding-3-small (1536 dimensions)
+embedding_type = EmbeddingType(
+    dimensions=1536, 
+    embedding_model="text-embedding-3-small"
+)
+```
+
+```python Custom dimensions
+from fenic import EmbeddingType
+
+# text-embedding-3-small with custom dimensions
+embedding_type = EmbeddingType(
+    dimensions=384, 
+    embedding_model="text-embedding-3-small"
+)
+```
+
+```python Using with semantic operations
+import fenic as fc
+
+df = session.create_dataframe({
+    "text": ["Hello world", "Fenic is great"]
+})
+
+# Generate embeddings
+df_with_embeddings = df.semantic.embed(
+    fc.col("text"),
+    output_col="embedding",
+    model="text-embedding-3-small"
+)
+
+# The embedding column will have type:
+# EmbeddingType(dimensions=1536, embedding_model="text-embedding-3-small")
+```
+</CodeGroup>
+
+---
+
+## Type Casting
+
+Use the `cast()` method to convert columns between types:
+
+```python
+import fenic as fc
+
+# Cast to string
+df = df.select(fc.col("id").cast(fc.StringType))
+
+# Cast to integer
+df = df.select(fc.col("amount").cast(fc.IntegerType))
+
+# Cast to specialized types
+df = df.select(
+    fc.col("content").cast(fc.MarkdownType),
+    fc.col("data").cast(fc.JsonType),
+)
+```
+
+## Type Validation
+
+Fenic validates types at plan construction time. Type mismatches are caught early:
+
+```python
+# This will raise a validation error
+df = df.select(
+    fc.col("string_col") + fc.col("array_col")  # Can't add string and array
+)
+```
+
+## Working with Complex Types
+
+### Accessing Struct Fields
+
+Use `get_item()` or `unnest()` to access struct fields:
+
+<CodeGroup>
+```python Using get_item()
+df = df.select(
+    fc.col("person").get_item("name").alias("name"),
+    fc.col("person").get_item("age").alias("age")
+)
+```
+
+```python Using unnest()
+# Automatically expands all fields
+df = df.unnest("person")
+```
+</CodeGroup>
+
+### Accessing Array Elements
+
+Use `get_item()` with an index or `explode()` to expand arrays:
+
+<CodeGroup>
+```python Get first element
+df = df.select(
+    fc.col("tags").get_item(0).alias("first_tag")
+)
+```
+
+```python Explode array into rows
+df = df.select(
+    fc.col("id"),
+    fc.col("tags")
+).explode("tags")
+# Each array element becomes a separate row
+```
+</CodeGroup>
+
+## See Also
+
+- [Schema](/api/types/schema) - Define DataFrame schemas
+- [Semantic Types](/api/types/semantic-types) - Model configuration types
+- [DataFrame](/api/dataframe) - DataFrame operations

@@ -1,0 +1,516 @@
+---
+title: 'MCP Tools'
+description: 'Tool types and configuration for MCP integration'
+icon: 'wrench'
+---
+
+## Overview
+
+Fenic provides two types of tools for MCP integration:
+
+1. **UserDefinedTool** - Created from parameterized DataFrame views using `df.create_tool()`
+2. **SystemTool** - Created by wrapping Python functions that return LogicalPlans
+
+Both tool types can be registered with `FenicMCPServer` and exposed to LLM agents.
+
+## Tool Types
+
+### UserDefinedTool
+
+A tool created from a parameterized DataFrame view. Parameters are defined using `F.tool_param()` in the DataFrame query.
+
+```python
+from fenic.core.mcp.types import UserDefinedTool, BoundToolParam
+
+# Created automatically via df.create_tool()
+tool = df.create_tool(
+    name="Get Sales by Region",
+    description="Retrieve sales data filtered by region",
+    params=[...],
+    result_limit=100
+)
+```
+
+**Attributes:**
+
+<ParamField path="name" type="str" required>
+  Tool name displayed to MCP clients. Automatically converted to snake_case for the function name.
+</ParamField>
+
+<ParamField path="description" type="str" required>
+  Description of what the tool does. Shown to LLM agents.
+</ParamField>
+
+<ParamField path="params" type="list[BoundToolParam]" required>
+  List of bound parameters. Each parameter corresponds to a `F.tool_param()` usage in the DataFrame.
+</ParamField>
+
+<ParamField path="max_result_limit" type="int" required>
+  Maximum number of rows to return. Automatically enforced even if agent requests more.
+</ParamField>
+
+<ParamField path="_parameterized_view" type="LogicalPlan" required>
+  Internal logical plan with unresolved parameters. Bound at execution time.
+</ParamField>
+
+---
+
+### SystemTool
+
+A tool implemented as a regular Python function with explicit parameters. The function must return a `LogicalPlan`.
+
+```python
+from fenic.core.mcp.types import SystemTool
+
+tool = SystemTool(
+    name="Get Top Products",
+    description="Retrieve the top selling products",
+    func=get_top_products,
+    max_result_limit=100,
+    add_limit_parameter=True,
+    default_table_format="markdown",
+    read_only=True,
+    idempotent=True,
+    destructive=False,
+    open_world=False
+)
+```
+
+**Attributes:**
+
+<ParamField path="name" type="str" required>
+  Tool name displayed to MCP clients. Automatically converted to snake_case for the function name.
+</ParamField>
+
+<ParamField path="description" type="str" required>
+  Description of what the tool does. Shown to LLM agents.
+</ParamField>
+
+<ParamField path="func" type="Callable[..., LogicalPlan]" required>
+  Python function that returns a LogicalPlan. Function signature and annotations are preserved for schema generation.
+</ParamField>
+
+<ParamField path="max_result_limit" type="int" optional>
+  Maximum number of rows to return. If None, no limit is enforced.
+</ParamField>
+
+<ParamField path="add_limit_parameter" type="bool" default="True">
+  Whether to expose a `limit` parameter to agents. Only applies if `max_result_limit` is set.
+</ParamField>
+
+<ParamField path="default_table_format" type="TableFormat" default="markdown">
+  Default format for results. Options: `"structured"` (JSON) or `"markdown"` (table).
+</ParamField>
+
+<ParamField path="read_only" type="bool" default="True">
+  Hint to MCP clients that the tool only reads data, doesn't modify it.
+</ParamField>
+
+<ParamField path="idempotent" type="bool" default="True">
+  Hint that repeated calls with same parameters produce the same result.
+</ParamField>
+
+<ParamField path="destructive" type="bool" default="False">
+  Hint that the tool deletes or modifies data.
+</ParamField>
+
+<ParamField path="open_world" type="bool" default="False">
+  Hint that the tool reaches out to external endpoints or knowledge bases.
+</ParamField>
+
+---
+
+## Tool Parameters
+
+### ToolParam
+
+Defines a parameter for a user-defined tool. Matched to `F.tool_param()` expressions in the DataFrame.
+
+```python
+from fenic.core.mcp.types import ToolParam
+
+param = ToolParam(
+    name="region",
+    description="Geographic region to filter by",
+    allowed_values=["North", "South", "East", "West"],
+    has_default=False,
+    default_value=None
+)
+```
+
+**Attributes:**
+
+<ParamField path="name" type="str" required>
+  Parameter name. Must match the name used in `F.tool_param()`.
+</ParamField>
+
+<ParamField path="description" type="str" required>
+  Description of the parameter shown to agents.
+</ParamField>
+
+<ParamField path="allowed_values" type="list[ToolParameterType]" optional>
+  Constrain parameter to specific values. Creates a Literal type in the schema.
+  
+  Supported types: `str`, `int`, `float`, `bool`, `list`, `dict`
+</ParamField>
+
+<ParamField path="has_default" type="bool" default="False">
+  Whether the parameter has a default value. Automatically set to True if `default_value` is provided.
+</ParamField>
+
+<ParamField path="default_value" type="ToolParameterType" optional>
+  Default value for the parameter. Makes the parameter optional.
+</ParamField>
+
+**Properties:**
+
+<ParamField path="required" type="bool" readonly>
+  Whether the parameter is required. Returns `not has_default`.
+</ParamField>
+
+---
+
+### BoundToolParam
+
+A parameter that has been bound to a specific typed usage within a DataFrame. Created automatically when calling `df.create_tool()`.
+
+```python
+from fenic.core.mcp.types import BoundToolParam
+from fenic.core.types.datatypes import DataType
+
+bound_param = BoundToolParam(
+    name="region",
+    description="Geographic region",
+    data_type=DataType.STRING,
+    required=True,
+    has_default=False,
+    default_value=None,
+    allowed_values=["North", "South", "East", "West"]
+)
+```
+
+**Attributes:**
+
+<ParamField path="name" type="str" required>
+  Parameter name.
+</ParamField>
+
+<ParamField path="description" type="str" required>
+  Parameter description.
+</ParamField>
+
+<ParamField path="data_type" type="DataType" required>
+  Fenic data type inferred from the DataFrame context.
+</ParamField>
+
+<ParamField path="required" type="bool" required>
+  Whether the parameter is required.
+</ParamField>
+
+<ParamField path="has_default" type="bool" required>
+  Whether the parameter has a default value.
+</ParamField>
+
+<ParamField path="default_value" type="ToolParameterType" optional>
+  Default value for the parameter.
+</ParamField>
+
+<ParamField path="allowed_values" type="list[ToolParameterType]" optional>
+  Allowed values constraint.
+</ParamField>
+
+---
+
+## Table Formats
+
+All tools support two output formats:
+
+### Structured Format
+
+Returns data as a list of JSON objects:
+
+```json
+{
+  "table_schema": [
+    {"name": "product", "type": "String"},
+    {"name": "sales", "type": "Int64"}
+  ],
+  "rows": [
+    {"product": "Widget", "sales": 100},
+    {"product": "Gadget", "sales": 150}
+  ],
+  "returned_result_count": 2,
+  "total_result_count": 2
+}
+```
+
+### Markdown Format
+
+Returns data as a markdown table:
+
+```markdown
+| product | sales |
+| --- | --- |
+| Widget | 100 |
+| Gadget | 150 |
+```
+
+Agents can specify the format using the `table_format` parameter (automatically added to all tools).
+
+---
+
+## Creating Tools
+
+### User-Defined Tools
+
+Create from parameterized DataFrame views:
+
+```python
+from fenic import Session, F
+from fenic.core.mcp.types import ToolParam
+
+session = Session.get_or_create(config=...)
+df = session.read.csv("sales.csv")
+
+# Create parameterized view
+filtered_df = df.filter(
+    (F.col("region") == F.tool_param(
+        "region",
+        description="Sales region",
+        allowed_values=["North", "South", "East", "West"]
+    )) &
+    (F.col("date") >= F.tool_param(
+        "start_date",
+        description="Start date (YYYY-MM-DD)"
+    ))
+)
+
+# Create tool
+sales_tool = filtered_df.create_tool(
+    name="Get Sales by Region",
+    description="Retrieve sales data filtered by region and date",
+    params=[
+        ToolParam(
+            name="region",
+            description="Sales region",
+            allowed_values=["North", "South", "East", "West"]
+        ),
+        ToolParam(
+            name="start_date",
+            description="Start date (YYYY-MM-DD)",
+            has_default=True,
+            default_value="2024-01-01"
+        ),
+    ],
+    result_limit=100
+)
+```
+
+### System Tools
+
+Create from Python functions:
+
+```python
+from fenic import Session, F
+from fenic.core.mcp.types import SystemTool
+from fenic.core._logical_plan import LogicalPlan
+from typing import Optional
+
+session = Session.get_or_create(config=...)
+
+def get_customer_summary(min_orders: int = 1) -> LogicalPlan:
+    """Get customer order summary.
+    
+    Args:
+        min_orders: Minimum number of orders to include customer
+        
+    Returns:
+        LogicalPlan with customer summary
+    """
+    df = session.read.csv("orders.csv")
+    return (
+        df.group_by("customer_id")
+        .agg(
+            F.count("*").alias("total_orders"),
+            F.sum("amount").alias("total_spent")
+        )
+        .filter(F.col("total_orders") >= min_orders)
+        .order_by(F.col("total_spent").desc())
+        .plan
+    )
+
+# Wrap as SystemTool
+customer_tool = SystemTool(
+    name="Get Customer Summary",
+    description="Retrieve customer order summaries with minimum order filter",
+    func=get_customer_summary,
+    max_result_limit=50,
+    read_only=True,
+    idempotent=True
+)
+```
+
+### System Tools with Complex Parameters
+
+Use type annotations for rich parameter schemas:
+
+```python
+from typing import List, Optional
+from fenic.core.mcp.types import SystemTool
+from fenic.core._logical_plan import LogicalPlan
+
+def search_products(
+    categories: List[str],
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    in_stock: bool = True
+) -> LogicalPlan:
+    """Search products with filters.
+    
+    Args:
+        categories: Product categories to search
+        min_price: Minimum price filter
+        max_price: Maximum price filter
+        in_stock: Only show in-stock products
+        
+    Returns:
+        LogicalPlan with filtered products
+    """
+    df = session.read.csv("products.csv")
+    
+    # Apply filters
+    result = df.filter(F.col("category").isin(categories))
+    
+    if min_price is not None:
+        result = result.filter(F.col("price") >= min_price)
+    
+    if max_price is not None:
+        result = result.filter(F.col("price") <= max_price)
+    
+    if in_stock:
+        result = result.filter(F.col("stock") > 0)
+    
+    return result.plan
+
+# Create tool (parameters inferred from function signature)
+product_tool = SystemTool(
+    name="Search Products",
+    description="Search products with category and price filters",
+    func=search_products,
+    max_result_limit=100
+)
+```
+
+---
+
+## Parameter Validation
+
+When creating user-defined tools, parameters are validated:
+
+1. All `F.tool_param()` usages must have corresponding `ToolParam` definitions
+2. Default values must be in `allowed_values` if both are specified
+3. All values in `allowed_values` must be the same type as `default_value`
+4. Multiple usages of the same parameter name must have identical configurations
+
+**Example Error:**
+
+```python
+# This will raise PlanError
+tool = df.create_tool(
+    name="Get Sales",
+    description="...",
+    params=[
+        ToolParam(
+            name="region",
+            allowed_values=["North", "South"],
+            default_value="West"  # ERROR: not in allowed_values
+        )
+    ],
+    result_limit=100
+)
+```
+
+---
+
+## Result Limiting
+
+All tools enforce result limits:
+
+```python
+# Tool with 100 row limit
+tool = df.create_tool(
+    name="Get Data",
+    description="...",
+    params=[],
+    result_limit=100  # Max 100 rows
+)
+
+# Agent can request fewer rows
+# tool(limit=50) -> returns 50 rows
+
+# Agent cannot exceed tool limit
+# tool(limit=200) -> returns 100 rows (capped by tool)
+```
+
+For system tools:
+
+```python
+tool = SystemTool(
+    name="Get Data",
+    description="...",
+    func=get_data,
+    max_result_limit=100,       # Tool enforces max 100 rows
+    add_limit_parameter=True    # Expose 'limit' param to agent
+)
+```
+
+Set `add_limit_parameter=False` to hide the limit parameter from agents.
+
+---
+
+## Type Inference
+
+Fenic automatically infers Python types for tool parameters:
+
+**From DataFrame Context:**
+
+```python
+# String parameter inferred from String column
+df.filter(F.col("name") == F.tool_param("name_filter"))
+
+# Integer parameter inferred from Int64 column
+df.filter(F.col("age") > F.tool_param("min_age"))
+
+# Array parameter inferred from Array column
+df.filter(F.col("tags").array_contains(F.tool_param("tag")))
+```
+
+**From Allowed Values:**
+
+```python
+# Literal["A", "B", "C"] inferred from allowed_values
+ToolParam(
+    name="category",
+    allowed_values=["A", "B", "C"]
+)
+```
+
+**From Function Annotations:**
+
+```python
+def get_data(
+    category: str,           # str parameter
+    min_value: int,          # int parameter
+    tags: List[str],         # list[str] parameter
+    optional: Optional[str]  # Optional[str] parameter
+) -> LogicalPlan:
+    ...
+```
+
+---
+
+## Related
+
+- [MCP Server](/api/mcp/server) - Server setup and configuration
+- [MCP Integration Guide](/integrations/mcp-server) - Complete integration guide
+- [DataFrame.create_tool()](/api/dataframe#create_tool) - Tool creation method

@@ -1,0 +1,344 @@
+---
+title: 'News Article Bias Detection'
+description: 'Detect editorial bias and analyze news articles using semantic classification and extraction'
+icon: 'newspaper'
+---
+
+<p>
+  <a href="https://colab.research.google.com/github/typedef-ai/fenic/blob/main/examples/news_analysis/news_analysis.ipynb">
+    <img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg" />
+  </a>
+</p>
+
+A comprehensive demonstration of Fenic's semantic classification capabilities for detecting editorial bias and analyzing news articles across multiple sources.
+
+## Overview
+
+This pipeline performs sophisticated news analysis using Fenic's semantic operations:
+
+- **Language Analysis**: Uses `semantic.extract()` to identify biased, emotional, or sensationalist language patterns
+- **Political Bias Classification**: Uses `semantic.classify()` grounded in extracted data for accurate bias detection
+- **Topic Classification**: Categorizes articles by subject (politics, technology, business, climate, healthcare)
+- **AI-Powered Source Profiling**: Uses `semantic.reduce()` to create comprehensive media profiles
+
+<Info>
+Available in both **Python script** (`news_analysis.py`) and **Jupyter notebook** (`news_analysis.ipynb`) formats for different learning preferences.
+</Info>
+
+## Key Features
+
+### Two-Stage Analysis Pipeline
+
+**Stage 1 - Information Extraction**: Uses `semantic.extract()` with Pydantic models to identify bias indicators, emotional language, and opinion markers.
+
+**Stage 2 - Grounded Classification**: Uses extracted information as context for `semantic.classify()` to achieve more accurate political bias detection.
+
+### Multi-Dimensional Classification
+
+Simultaneously classifies articles across:
+- **Topics**: politics, technology, business, climate, healthcare
+- **Political Bias**: far_left, left_leaning, neutral, right_leaning, far_right
+- **Journalistic Style**: sensationalist vs informational
+
+### Source Consistency Analysis
+
+Analyzes bias patterns across multiple articles per source to identify editorial consistency.
+
+### AI-Generated Media Profiles
+
+Uses `semantic.reduce()` to synthesize extracted information into comprehensive, natural language profiles for each news source.
+
+## Dataset
+
+The example includes **25 news articles from 8 sources** covering diverse topics:
+
+- **Politics**: Federal Reserve policy, climate agreements, Supreme Court cases
+- **Technology**: AI developments, content moderation, privacy concerns
+- **Business**: Corporate earnings, market analysis, economic trends
+- **Healthcare**: Medical breakthroughs, drug pricing, treatment access
+
+## Implementation
+
+### Session Configuration
+
+```python
+import fenic as fc
+from pydantic import BaseModel, Field
+
+config = fc.SessionConfig(
+    app_name="news_analysis",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "openai": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000
+            ),
+            # Alternative models:
+            # "gemini": fc.GoogleDeveloperLanguageModel(
+            #     model_name="gemini-2.0-flash",
+            #     rpm=500,
+            #     tpm=1_000_000
+            # ),
+            # "anthropic": fc.AnthropicLanguageModel(
+            #     model_name="claude-3-5-haiku-latest",
+            #     rpm=500,
+            #     input_tpm=80_000,
+            #     output_tpm=32_000,
+            # )
+        }
+    )
+)
+
+session = fc.Session.get_or_create(config)
+```
+
+<Note>
+The script includes commented configurations for Google Gemini and Anthropic models if you prefer different providers.
+</Note>
+
+### Stage 1: Information Extraction
+
+```python
+# Define Pydantic model for article analysis
+class ArticleAnalysis(BaseModel):
+    """Comprehensive analysis of news article content and bias."""
+    bias_indicators: str = Field(
+        description="Key words or phrases that indicate political bias"
+    )
+    emotional_language: str = Field(
+        description="Emotionally charged words or neutral descriptive language"
+    )
+    opinion_markers: str = Field(
+        description="Words or phrases that signal opinion vs. factual reporting"
+    )
+
+# Create combined content for analysis
+combined_content = fc.text.concat(
+    fc.col("headline"),
+    fc.lit(" | "),
+    fc.col("content")
+)
+
+# Extract metadata and classify primary topic
+enriched_df = df.with_column("combined_content", combined_content).select(
+    fc.col("source"),
+    fc.col("headline"),
+    fc.col("content"),
+    # Topic classification
+    fc.semantic.classify(
+        fc.col("combined_content"),
+        ["politics", "technology", "business", "climate", "healthcare"]
+    ).alias("primary_topic"),
+    # Extract structured analysis using Pydantic
+    fc.semantic.extract(
+        fc.col("combined_content"),
+        ArticleAnalysis,
+        max_output_tokens=512,
+    ).alias("analysis_metadata"),
+).unnest("analysis_metadata")
+```
+
+### Stage 2: Grounded Classification
+
+```python
+# Combine extracted information for context-aware classification
+combined_extracts = fc.text.jinja(
+    (
+        "Primary Topic: {{primary_topic}}\n"
+        "Political Bias Indicators: {{bias_indicators}}\n"
+        "Emotional Language Summary: {{emotional_language}}\n"
+        "Opinion Markers: {{opinion_markers}}"
+    ),
+    primary_topic=fc.col("primary_topic"),
+    bias_indicators=fc.col("bias_indicators"),
+    emotional_language=fc.col("emotional_language"),
+    opinion_markers=fc.col("opinion_markers")
+)
+
+enriched_df = enriched_df.with_column("combined_extracts", combined_extracts)
+
+# Classify bias using extracted context
+results_df = enriched_df.select(
+    "*",
+    fc.semantic.classify(
+        fc.col("combined_extracts"),
+        ["far_left", "left_leaning", "neutral", "right_leaning", "far_right"]
+    ).alias("content_bias"),
+    fc.semantic.classify(
+        fc.col("combined_extracts"),
+        ["sensationalist", "informational"]
+    ).alias("journalistic_style")
+).cache()
+```
+
+<Info>
+Grounded classification improves accuracy by first extracting relevant context, then using that information to make more informed classifications.
+</Info>
+
+### AI-Powered Source Profiling
+
+```python
+# Prepare article attributes for profiling
+results_df = results_df.with_column("article_attributes", fc.text.jinja(
+    (
+        "Primary Topics: {{primary_topic}}\n"
+        "Detected Political Bias: {{content_bias}}\n"
+        "Detected Bias Indicators: {{bias_indicators}}\n"
+        "Opinion Indicators: {{opinion_markers}}\n"
+        "Emotional Language: {{emotional_language}}\n"
+        "Journalistic Style: {{journalistic_style}}"
+    ),
+    primary_topic=fc.col("primary_topic"),
+    content_bias=fc.col("content_bias"),
+    bias_indicators=fc.col("bias_indicators"),
+    opinion_markers=fc.col("opinion_markers"),
+    emotional_language=fc.col("emotional_language"),
+    journalistic_style=fc.col("journalistic_style")
+))
+
+# Generate semantic summaries for each source
+source_language_profiles = results_df.group_by("source").agg(
+    fc.semantic.reduce(
+        """
+        You are given a set of article analyses from {{news_outlet}}.
+        Create a concise (3-5 sentence) media profile for {{news_outlet}}.
+        Summarize the information provided without explicitly referencing it.
+        """,
+        column=fc.col("article_attributes"),
+        group_context={
+            "news_outlet": fc.col("source"),
+        },
+        max_output_tokens=1024,
+    ).alias("source_profile"),
+).select(fc.col("source"), fc.col("source_profile")).cache()
+
+print("AI-Generated Media Profiles:")
+source_language_profiles.show()
+```
+
+## Analytics
+
+### Distribution Analysis
+
+```python
+# Source bias distribution
+source_bias_distribution = results_df.group_by("source", "content_bias").agg(
+    fc.count("*").alias("count")
+).order_by(["source", fc.desc("count")])
+
+print("Source Bias Distribution:")
+source_bias_distribution.show()
+
+# Topic distribution
+print("Topic Distribution:")
+results_df.group_by("primary_topic").agg(
+    fc.count("*").alias("count")
+).order_by(fc.desc("count")).show()
+
+# Bias level distribution
+print("Content Bias Distribution:")
+results_df.group_by("content_bias").agg(
+    fc.count("*").alias("count")
+).order_by(fc.desc("count")).show()
+
+# Topic vs Bias cross-analysis
+print("Topic vs Bias Analysis:")
+results_df.group_by("primary_topic", "content_bias").agg(
+    fc.count("*").alias("count")
+).order_by(cols=[fc.col("primary_topic"), fc.desc("count")]).show()
+```
+
+### Language Pattern Analysis
+
+```python
+# Show examples of neutral vs biased language
+print("Neutral Articles - Language Patterns:")
+results_df.filter(
+    fc.col("content_bias") == "neutral"
+).select(
+    "source",
+    "headline",
+    "bias_indicators",
+    "opinion_markers"
+).show(5)
+
+print("Biased Articles - Language Patterns:")
+results_df.filter(
+    fc.col("content_bias") != "neutral"
+).select(
+    "source",
+    "headline",
+    "content_bias",
+    "bias_indicators",
+    "emotional_language",
+    "opinion_markers"
+).show(6)
+```
+
+## Expected Results
+
+### Generated Source Profile Example
+
+> The Balanced Tribune presents a diverse range of topics, primarily focusing on business, technology, climate, and healthcare. It exhibits a right-leaning bias in its business and technology coverage, emphasizing themes like Wall Street stability and American free enterprise, while adopting a far-left perspective on climate issues, critiquing fossil fuel companies. The publication often employs sensationalist and informational journalistic styles, utilizing emotional language to evoke strong reactions.
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Media Organizations" icon="building">
+    Content quality assessment, bias detection in reporter training, and audience analytics.
+  </Card>
+  <Card title="News Aggregators" icon="rss">
+    Content categorization, bias warnings for balanced consumption, and source diversity.
+  </Card>
+  <Card title="Research Applications" icon="flask">
+    Media bias studies, information quality research, and comparative analysis.
+  </Card>
+  <Card title="Educational Tools" icon="graduation-cap">
+    Media literacy training, critical thinking exercises, and journalism education.
+  </Card>
+</CardGroup>
+
+## Running the Example
+
+<CodeGroup>
+```bash Python Script
+# Set your API key (OpenAI, Google, or Anthropic)
+export OPENAI_API_KEY="your-api-key-here"
+# export GOOGLE_API_KEY="your-api-key-here"
+# export ANTHROPIC_API_KEY="your-api-key-here"
+
+python news_analysis.py
+```
+
+```bash Jupyter Notebook
+# Launch notebook for step-by-step walkthrough
+jupyter notebook news_analysis.ipynb
+```
+</CodeGroup>
+
+## Advanced Features
+
+### Grounded Classification Pipeline
+
+Shows how to improve classification accuracy by first extracting relevant information with `semantic.extract()`, then using that context for more informed `semantic.classify()` operations.
+
+### Pydantic Integration
+
+Demonstrates structured data extraction using type-safe Pydantic models with automatic field validation.
+
+### Multi-Model Support
+
+Includes configurations for Google Gemini (default), OpenAI, and Anthropic models.
+
+### Semantic Reduction for Profiling
+
+Uses `semantic.reduce()` to synthesize multiple data points into coherent natural language profiles.
+
+## Key Insights Demonstrated
+
+- Content-based bias detection without relying on source name predictions
+- Source consistency analysis across multiple articles
+- Language pattern identification for bias indicators
+- Topic-agnostic bias detection (same source biased across different topics)
+- Quality assessment with confidence scoring

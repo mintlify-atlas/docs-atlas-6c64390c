@@ -1,0 +1,292 @@
+---
+title: Session
+description: The entry point for programming with the DataFrame API
+---
+
+The `Session` class is the main entry point for all Fenic DataFrame operations. It manages configuration, execution backends, and resource lifecycle. Similar to PySpark's SparkSession.
+
+## Creating a Session
+
+### get_or_create
+
+```python
+Session.get_or_create(config: SessionConfig) -> Session
+```
+
+Gets an existing Session or creates a new one with the configured settings.
+
+<ParamField path="config" type="SessionConfig" required>
+  Configuration object specifying session settings including:
+  - `app_name`: Name of the application
+  - `cloud`: Whether to use cloud execution backend
+  - `api_key`: API key for cloud execution (required when cloud=True)
+</ParamField>
+
+<ResponseField name="Session" type="Session">
+  A Session instance configured with the provided settings
+</ResponseField>
+
+<CodeGroup>
+```python Local Session
+session = Session.get_or_create(
+    SessionConfig(app_name="my_app")
+)
+```
+
+```python Cloud Session
+config = SessionConfig(
+    app_name="my_app",
+    cloud=True,
+    api_key="your_api_key"
+)
+session = Session.get_or_create(config)
+```
+</CodeGroup>
+
+<Note>
+  Direct construction using `Session()` is not allowed. Always use `Session.get_or_create()`.
+</Note>
+
+## Properties
+
+### read
+
+```python
+session.read -> DataFrameReader
+```
+
+Returns a `DataFrameReader` that can be used to read data as a DataFrame.
+
+<ResponseField name="DataFrameReader" type="DataFrameReader">
+  A reader interface to read data into DataFrame from various sources (CSV, Parquet, JSON, etc.)
+</ResponseField>
+
+```python
+# Read a CSV file
+df = session.read.csv("data.csv")
+
+# Read a Parquet file
+df = session.read.parquet("data.parquet")
+```
+
+### catalog
+
+```python
+session.catalog -> Catalog
+```
+
+Interface for catalog operations on the Session, including listing tables, views, and managing temporary tables.
+
+<ResponseField name="Catalog" type="Catalog">
+  Catalog interface for managing tables and views
+</ResponseField>
+
+```python
+# List all tables
+tables = session.catalog.list_tables()
+
+# Check if table exists
+exists = session.catalog.table_exists("my_table")
+```
+
+## Core Methods
+
+### create_dataframe
+
+```python
+session.create_dataframe(data: DataLike) -> DataFrame
+```
+
+Create a DataFrame from a variety of Python-native data formats.
+
+<ParamField path="data" type="DataLike" required>
+  Input data. Must be one of:
+  - Polars DataFrame
+  - Pandas DataFrame
+  - dict of column_name → list of values
+  - list of dicts (each dict representing a row)
+  - pyarrow Table
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A new DataFrame instance
+</ResponseField>
+
+<CodeGroup>
+```python From Dictionary
+df = session.create_dataframe({
+    "col1": [1, 2, 3],
+    "col2": ["a", "b", "c"]
+})
+```
+
+```python From List of Dicts
+df = session.create_dataframe([
+    {"col1": 1, "col2": "a"},
+    {"col1": 2, "col2": "b"}
+])
+```
+
+```python From Polars
+import polars as pl
+
+pl_df = pl.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+df = session.create_dataframe(pl_df)
+```
+
+```python From Pandas
+import pandas as pd
+
+pd_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+df = session.create_dataframe(pd_df)
+```
+
+```python From PyArrow
+import pyarrow as pa
+
+table = pa.Table.from_pydict({"col1": [1, 2], "col2": ["a", "b"]})
+df = session.create_dataframe(table)
+```
+</CodeGroup>
+
+### table
+
+```python
+session.table(table_name: str) -> DataFrame
+```
+
+Returns the specified table as a DataFrame.
+
+<ParamField path="table_name" type="str" required>
+  Name of the table to load
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  Table as a DataFrame
+</ResponseField>
+
+```python
+# Load an existing table
+df = session.table("my_table")
+```
+
+<Warning>
+  Raises `ValueError` if the table does not exist.
+</Warning>
+
+### view
+
+```python
+session.view(view_name: str) -> DataFrame
+```
+
+Returns the specified view as a DataFrame.
+
+<ParamField path="view_name" type="str" required>
+  Name of the view to load
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  View as a DataFrame
+</ResponseField>
+
+```python
+# Load an existing view
+df = session.view("my_view")
+```
+
+<Warning>
+  Raises `CatalogError` if the view does not exist.
+</Warning>
+
+### sql
+
+```python
+session.sql(query: str, /, **tables: DataFrame) -> DataFrame
+```
+
+Execute a read-only SQL query against one or more DataFrames using named placeholders.
+
+<ParamField path="query" type="str" required>
+  A SQL query string with placeholders like `{df}`
+</ParamField>
+
+<ParamField path="tables" type="**DataFrame" required>
+  Keyword arguments mapping placeholder names to DataFrames
+</ParamField>
+
+<ResponseField name="DataFrame" type="DataFrame">
+  A lazy DataFrame representing the result of the SQL query
+</ResponseField>
+
+<CodeGroup>
+```python Simple Join
+df1 = session.create_dataframe({"id": [1, 2]})
+df2 = session.create_dataframe({"id": [2, 3]})
+
+result = session.sql(
+    "SELECT * FROM {df1} JOIN {df2} USING (id)",
+    df1=df1,
+    df2=df2
+)
+```
+
+```python Complex Query
+users = session.create_dataframe({
+    "user_id": [1, 2],
+    "name": ["Alice", "Bob"]
+})
+orders = session.create_dataframe({
+    "order_id": [1, 2],
+    "user_id": [1, 2]
+})
+products = session.create_dataframe({
+    "product_id": [1, 2],
+    "name": ["Widget", "Gadget"]
+})
+
+result = session.sql("""
+    SELECT u.name, p.name as product
+    FROM {users} u
+    JOIN {orders} o ON u.user_id = o.user_id
+    JOIN {products} p ON o.product_id = p.product_id
+""", users=users, orders=orders, products=products)
+```
+</CodeGroup>
+
+<Info>
+  For supported SQL syntax and functions, refer to the [DuckDB SQL documentation](https://duckdb.org/docs/sql/introduction).
+</Info>
+
+<Warning>
+  Raises `ValidationError` if a placeholder is used in the query but not passed as a keyword argument.
+</Warning>
+
+### stop
+
+```python
+session.stop(skip_usage_summary: bool = False) -> None
+```
+
+Stops the session and closes all connections.
+
+<ParamField path="skip_usage_summary" type="bool" default="False">
+  Whether to skip printing the usage summary
+</ParamField>
+
+```python
+# Stop session with usage summary
+session.stop()
+
+# Stop without printing summary
+session.stop(skip_usage_summary=True)
+```
+
+<Note>
+  Unless `skip_usage_summary` is set, a summary of your session's metrics will print when you stop your session.
+</Note>
+
+## Aliases
+
+- `createDataFrame` → `create_dataframe`
+- `getOrCreate` → `get_or_create`

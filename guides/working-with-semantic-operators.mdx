@@ -1,0 +1,419 @@
+---
+title: 'Working with Semantic Operators'
+description: 'Learn how to use semantic operators for LLM-powered data transformations'
+---
+
+Semantic operators are Fenic's core capability for LLM-powered data transformations. They allow you to apply natural language instructions to transform, extract, classify, and process data at scale.
+
+## Overview
+
+Semantic operators offload inference work from your agent's context window to Fenic's execution layer. Your agent receives structured results without consuming tokens for the transformation itself.
+
+### Available Semantic Operators
+
+| Operator | Purpose | Returns |
+|----------|---------|--------|
+| `semantic.extract()` | Extract structured data from text | Struct (Pydantic schema) |
+| `semantic.map()` | Apply generation prompt to columns | String or Struct |
+| `semantic.classify()` | Classify text into categories | String (category) |
+| `semantic.predicate()` | Boolean evaluation via LLM | Boolean |
+| `semantic.reduce()` | Aggregate multiple texts | String (aggregated) |
+| `semantic.embed()` | Generate embeddings | Array[Float] |
+| `semantic.parse_pdf()` | Parse PDF to markdown | String |
+
+---
+
+## Extraction: semantic.extract()
+
+Extract structured information from unstructured text using Pydantic schemas.
+
+### Basic Extraction
+
+```python
+from pydantic import BaseModel, Field
+import fenic as fc
+
+class ErrorAnalysis(BaseModel):
+    root_cause: str = Field(description="The root cause of this error")
+    fix_recommendation: str = Field(description="How to fix this error")
+
+# Extract structured data from error logs
+df_analyzed = df.select(
+    "timestamp",
+    "service",
+    fc.semantic.extract(
+        "error_log",
+        ErrorAnalysis
+    ).alias("analysis")
+)
+
+# Access extracted fields
+df_analyzed.select(
+    "timestamp",
+    df_analyzed.analysis.root_cause.alias("root_cause"),
+    df_analyzed.analysis.fix_recommendation.alias("fix")
+).show()
+```
+
+### Nested Structures
+
+```python
+from typing import List
+
+class Triple(BaseModel):
+    subject: str = Field(description="The subject of the triple")
+    predicate: str = Field(description="The predicate or relation")
+    object: str = Field(description="The object of the triple")
+
+class KGResult(BaseModel):
+    triples: List[Triple] = Field(description="List of extracted knowledge graph triples")
+    entities: list[str] = Field(description="Flat list of all detected named entities")
+
+df.select(
+    fc.semantic.extract("blurb", KGResult).alias("kg")
+).unnest("kg").explode("triples")
+```
+
+### Extraction Parameters
+
+```python
+fc.semantic.extract(
+    column="text",
+    response_format=MySchema,
+    model_alias="gpt-4o-mini",  # Override default model
+    temperature=0.0,              # Control randomness
+    max_output_tokens=1024,       # Limit output size
+    request_timeout=120           # Timeout in seconds
+)
+```
+
+---
+
+## Generation: semantic.map()
+
+Apply generation prompts using Jinja2 templates for rich transformations.
+
+### Basic Generation
+
+```python
+# Summarize with template
+df.select(
+    fc.semantic.map(
+        "Write a compelling one-line description for {{ name }}: {{ details }}",
+        name=fc.col("name"),
+        details=fc.col("details")
+    ).alias("description")
+)
+```
+
+### Structured Output
+
+```python
+class Summary(BaseModel):
+    key_points: list[str] = Field(description="3-5 key points")
+    sentiment: str = Field(description="Overall sentiment: positive/negative/neutral")
+
+df.select(
+    fc.semantic.map(
+        "Analyze this review: {{ review_text }}",
+        review_text=fc.col("review"),
+        response_format=Summary
+    ).alias("analysis")
+).unnest("analysis")
+```
+
+### Few-Shot Examples
+
+```python
+from fenic.core.types import MapExampleCollection, MapExample
+
+examples = MapExampleCollection()
+examples.create_example(MapExample(
+    input={"name": "GlowMate", "details": "A rechargeable bedside lamp with adjustable color temperatures"},
+    output="The modern touch-controlled lamp for better sleep and style."
+))
+examples.create_example(MapExample(
+    input={"name": "AquaPure", "details": "A compact water filter that attaches to your faucet"},
+    output="Clean, great-tasting water straight from your tap."
+))
+
+df.select(
+    fc.semantic.map(
+        "Write a compelling one-line description for {{ name }}: {{ details }}",
+        name=fc.col("name"),
+        details=fc.col("details"),
+        examples=examples
+    ).alias("tagline")
+)
+```
+
+---
+
+## Classification: semantic.classify()
+
+Classify text into predefined categories.
+
+```python
+# Simple classification
+df.select(
+    "error_log",
+    fc.semantic.classify(
+        "error_log",
+        ["low", "medium", "high", "critical"]
+    ).alias("severity")
+)
+
+# Filter by classification
+critical = df.filter(
+    fc.semantic.classify("error_log", ["low", "medium", "high", "critical"]) == "critical"
+)
+```
+
+---
+
+## Boolean Predicates: semantic.predicate()
+
+Evaluate boolean conditions using natural language.
+
+### Basic Filtering
+
+```python
+from textwrap import dedent
+
+# Filter products using semantic reasoning
+wireless_products = df.filter(
+    fc.semantic.predicate(
+        dedent('''\
+            Product: {{ description }}
+            Is this product wireless or battery-powered?'''),
+        description=fc.col("product_description")
+    )
+)
+```
+
+### With Examples
+
+```python
+from fenic.core.types import PredicateExampleCollection, PredicateExample
+
+examples = PredicateExampleCollection()
+examples.create_example(PredicateExample(
+    input={"ticket": "I was charged twice for my subscription"},
+    output=True
+))
+examples.create_example(PredicateExample(
+    input={"ticket": "How do I reset my password?"},
+    output=False
+))
+
+billing_tickets = df.filter(
+    fc.semantic.predicate(
+        "Ticket: {{ ticket }}\nThis ticket is about billing.",
+        ticket=fc.col("ticket_text"),
+        examples=examples
+    )
+)
+```
+
+---
+
+## Aggregation: semantic.reduce()
+
+Aggregate multiple texts into a single summary or synthesis.
+
+```python
+# Group and reduce
+df.group_by("category").agg(
+    fc.semantic.reduce(
+        "Summarize these documents in 2-3 sentences",
+        fc.col("document_text")
+    ).alias("summary")
+)
+
+# With ordering
+df.group_by("conversation_id").agg(
+    fc.semantic.reduce(
+        "Summarize this conversation chronologically",
+        fc.col("message"),
+        order_by=[fc.col("timestamp")]
+    ).alias("summary")
+)
+
+# With group context
+df.group_by("department", "region").agg(
+    fc.semantic.reduce(
+        "Summarize these {{department}} reports from {{region}}",
+        fc.col("document_text"),
+        group_context={
+            "department": fc.col("department"),
+            "region": fc.col("region")
+        }
+    ).alias("summary")
+)
+```
+
+---
+
+## Semantic Joins
+
+Join DataFrames using natural language reasoning.
+
+```python
+# Match users to content
+user_article_matches = users_df.semantic.join(
+    articles_df,
+    predicate="A person with interests '{{left_on}}' would be interested in '{{right_on}}'",
+    left_on=fc.col("interests"),
+    right_on=fc.col("description")
+)
+```
+
+### Similarity Joins
+
+```python
+# Top-k nearest neighbors
+query_df.semantic.sim_join(
+    documents_df,
+    left_on=fc.semantic.embed(fc.col("query")),
+    right_on=fc.col("doc_embedding"),
+    k=5,
+    similarity_metric="cosine",
+    similarity_score_column="relevance"
+)
+```
+
+---
+
+## Embeddings
+
+Generate vector embeddings for semantic search.
+
+```python
+# Generate embeddings
+df_embedded = df.select(
+    "id",
+    "text",
+    fc.semantic.embed(fc.col("text")).alias("embedding")
+)
+
+# Use in similarity joins
+queries = session.create_dataframe([{"q": "machine learning tutorials"}])
+
+results = queries.semantic.sim_join(
+    df_embedded,
+    left_on=fc.semantic.embed(fc.col("q")),
+    right_on=fc.col("embedding"),
+    k=10,
+    similarity_score_column="score"
+)
+```
+
+---
+
+## Model Selection
+
+### Using Model Aliases
+
+```python
+# Use specific model
+fc.semantic.extract(
+    "text",
+    MySchema,
+    model_alias="gpt-4o-mini"
+)
+
+# Use model profiles
+from fenic.core.types.semantic import ModelAlias
+
+fc.semantic.map(
+    "Analyze: {{ text }}",
+    text=fc.col("text"),
+    model_alias=ModelAlias(name="o4", profile="thorough")
+)
+```
+
+### Configure Models in Session
+
+```python
+config = fc.SessionConfig(
+    app_name="my_app",
+    semantic=fc.SemanticConfig(
+        language_models={
+            "fast": fc.OpenAILanguageModel(
+                model_name="gpt-4o-mini",
+                rpm=500,
+                tpm=200_000
+            ),
+            "powerful": fc.OpenAILanguageModel(
+                model_name="gpt-4o",
+                rpm=100,
+                tpm=100_000
+            )
+        },
+        embedding_models={
+            "embed": fc.OpenAIEmbeddingModel(
+                model_name="text-embedding-3-small",
+                rpm=500,
+                tpm=1_000_000
+            )
+        },
+        default_language_model="fast",
+        default_embedding_model="embed"
+    )
+)
+```
+
+---
+
+## Best Practices
+
+<Tip>
+**Provide Clear Descriptions**: Use detailed field descriptions in Pydantic models. The LLM uses these to understand what to extract.
+</Tip>
+
+<Warning>
+**Avoid Inference in Agents**: Don't use semantic operators inside your agent's reasoning loop if you can pre-compute results. Offload to Fenic.
+</Warning>
+
+<Note>
+**Temperature Control**: Use `temperature=0.0` for deterministic extraction and classification. Increase for creative generation.
+</Note>
+
+### Schema Design
+
+```python
+# Good: Clear descriptions
+class Product(BaseModel):
+    name: str = Field(description="The product's commercial name")
+    price: float = Field(description="Price in USD")
+    
+# Bad: No descriptions
+class Product(BaseModel):
+    name: str
+    price: float
+```
+
+### Error Handling
+
+```python
+# Semantic operators return None for failed operations
+df_with_nulls = df.select(
+    fc.semantic.extract("text", MySchema).alias("data")
+)
+
+# Filter out failures
+df_clean = df_with_nulls.filter(fc.col("data").is_not_null())
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Text Processing" icon="text" href="/guides/text-processing">
+    Learn about text chunking and parsing functions
+  </Card>
+  <Card title="Memory and Retrieval" icon="database" href="/guides/memory-and-retrieval">
+    Build semantic memory and retrieval systems
+  </Card>
+</CardGroup>

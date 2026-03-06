@@ -1,0 +1,660 @@
+---
+title: "MCP Server"
+description: "Expose Fenic context as tools via the Model Context Protocol"
+---
+
+Fenic provides native support for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), allowing you to expose context operations as tools that any MCP-compatible agent framework can use. This enables you to build context once in Fenic and serve it to agents in LangGraph, PydanticAI, CrewAI, or any other framework.
+
+## What is MCP?
+
+The Model Context Protocol is an open standard for connecting AI agents to external data sources and tools. Fenic's MCP integration allows you to:
+
+- **Expose Fenic tables as queryable tools** with automatic schema generation
+- **Create custom tools** from DataFrame operations
+- **Serve context via HTTP or stdio** for local and remote access
+- **Auto-generate CRUD operations** (Schema, Profile, Read, Search, Analyze) for any table
+
+## Quick Start
+
+### 1. Install MCP Support
+
+```bash
+pip install "fenic[mcp]"
+```
+
+### 2. Create a Basic MCP Server
+
+```python
+import fenic as fc
+from fenic.api.mcp import create_mcp_server
+
+# Configure session
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="docs"))
+
+# Create and populate a table
+df = session.create_dataframe([
+    {"id": 1, "question": "What is Fenic?", "answer": "A context engine for agents"},
+    {"id": 2, "question": "How do I install?", "answer": "pip install fenic"},
+])
+df.write.save_as_table("faq", mode="overwrite")
+
+# Create MCP server with auto-generated tools
+server = create_mcp_server(
+    session=session,
+    server_name="FAQ Server",
+    table_names=["faq"]  # Auto-generates Schema, Profile, Read, Search, Analyze tools
+)
+
+# Run on HTTP (default port 8000)
+server.run(transport="http", host="127.0.0.1", port=8000)
+```
+
+### 3. Connect from an Agent
+
+Configure your MCP client (Claude Desktop, Cline, etc.) to connect to `http://127.0.0.1:8000`.
+
+## Architecture
+
+```
+┌─────────────────┐
+│  Agent Runtime  │  (LangGraph, PydanticAI, etc.)
+└────────┬────────┘
+         │ MCP Protocol
+┌────────▼────────┐
+│  Fenic MCP      │  - Tool registration
+│  Server         │  - Result formatting
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  Fenic Session  │  - Context operations
+│  & DataFrames   │  - Semantic transforms
+└─────────────────┘
+```
+
+## Auto-Generated System Tools
+
+When you specify `table_names`, Fenic automatically generates six tools for each table:
+
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| **Schema** | List columns and types | First step in exploring data |
+| **Profile** | Statistics per column (min/max/mean/distinct/top values) | Understand data distribution |
+| **Read** | Read rows with filtering and pagination | Sample data or simple queries |
+| **Search Summary** | Regex search across all tables, return match counts | Find which tables contain relevant data |
+| **Search Content** | Return matching rows from a specific table | Get actual rows matching a pattern |
+| **Analyze** | Execute SQL (SELECT-only) across tables | Complex queries, aggregations, JOINs |
+
+### Example: Using Auto-Generated Tools
+
+<CodeGroup>
+```python Server Setup
+import fenic as fc
+from fenic.api.mcp import create_mcp_server
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="docs"))
+
+# Create policy Q&A table
+qa_df = session.create_dataframe([
+    {"source": "refund_policy.pdf", "question": "How long do refunds take?", 
+     "answer": "Refunds are processed within 5-7 business days"},
+    {"source": "refund_policy.pdf", "question": "What items can be refunded?",
+     "answer": "All items within 30 days with original packaging"},
+])
+qa_df.write.save_as_table("policy_qa", mode="overwrite")
+
+# Auto-generate tools with namespace
+server = create_mcp_server(
+    session=session,
+    server_name="Policy Server",
+    table_names=["policy_qa"],
+    tool_namespace="policy"  # Tools will be named: policy_schema, policy_read, etc.
+)
+```
+
+```json Agent Usage (Claude)
+// Agent can now call these tools:
+
+// 1. Explore schema
+{
+  "tool": "policy_schema",
+  "arguments": {}
+}
+
+// 2. Read sample rows
+{
+  "tool": "policy_read",
+  "arguments": {
+    "df_name": "policy_qa",
+    "limit": 10
+  }
+}
+
+// 3. Search for refund info
+{
+  "tool": "policy_search_content",
+  "arguments": {
+    "df_name": "policy_qa",
+    "pattern": "(?i)refund",
+    "limit": 5
+  }
+}
+
+// 4. SQL query
+{
+  "tool": "policy_analyze",
+  "arguments": {
+    "full_sql": "SELECT source, COUNT(*) as qa_count FROM {policy_qa} GROUP BY source"
+  }
+}
+```
+</CodeGroup>
+
+## Custom User-Defined Tools
+
+Create custom tools from DataFrame queries using `session.catalog.create_tool`:
+
+```python
+from fenic.core.mcp.types import ToolParam
+from fenic.core.types.datatypes import StringType
+
+# Create a parameterized search tool
+search_query = (
+    session.table("policy_qa")
+    .filter(
+        fc.col("question").rlike(fc.tool_param("query", StringType))
+        | fc.col("answer").rlike(fc.tool_param("query", StringType))
+    )
+    .select("source", "question", "answer")
+)
+
+session.catalog.create_tool(
+    tool_name="search_policies",
+    tool_description="Search policy Q&A by regex pattern",
+    tool_query=search_query,
+    tool_params=[
+        ToolParam(
+            name="query",
+            description="Regex pattern (use (?i) for case-insensitive)",
+        ),
+    ],
+    result_limit=20
+)
+
+# Get all catalog tools
+tools = session.catalog.list_tools()
+
+# Create server with custom tools
+server = create_mcp_server(
+    session=session,
+    server_name="Policy Server",
+    user_defined_tools=tools
+)
+```
+
+### Tool with Multiple Parameters
+
+```python
+# Search with filtering and ordering
+filtered_search = (
+    session.table("policy_qa")
+    .filter(
+        (fc.col("source") == fc.tool_param("source", StringType))
+        & (fc.col("question").rlike(fc.tool_param("pattern", StringType)))
+    )
+    .select("question", "answer")
+    .order_by(fc.col("question"))
+)
+
+session.catalog.create_tool(
+    tool_name="search_by_source",
+    tool_description="Search Q&A within a specific policy document",
+    tool_query=filtered_search,
+    tool_params=[
+        ToolParam(
+            name="source",
+            description="Policy document filename (e.g., 'refund_policy.pdf')",
+        ),
+        ToolParam(
+            name="pattern",
+            description="Regex pattern to search in questions",
+        ),
+    ],
+    result_limit=50
+)
+```
+
+## Real-World Example: Documentation Server
+
+From `examples/mcp_server/docs-server/server.py`:
+
+<CodeGroup>
+```python Server Implementation
+import fenic as fc
+from fenic.api.mcp import create_mcp_server
+from fenic.core.mcp.types import ToolParam
+from fenic.core.types.datatypes import StringType
+
+def setup_session():
+    work_dir = os.path.expanduser("~/.fenic")
+    os.makedirs(work_dir, exist_ok=True)
+    
+    return fc.Session.get_or_create(fc.SessionConfig(app_name="docs"))
+
+def register_search_tools(session):
+    # Tool 1: Search API by regex
+    search_query = (
+        session.table("api_df")
+        .filter(
+            (fc.col("is_public")) 
+            & (
+                fc.col("name").rlike(fc.tool_param("query", StringType))
+                | fc.col("qualified_name").rlike(fc.tool_param("query", StringType))
+                | fc.col("docstring").rlike(fc.tool_param("query", StringType))
+            )
+        )
+        .select("type", "name", "qualified_name", "docstring", "parameters")
+    )
+    
+    session.catalog.create_tool(
+        tool_name="search_fenic_api",
+        tool_description="Search Fenic API documentation using regex patterns",
+        tool_query=search_query,
+        tool_params=[
+            ToolParam(name="query", description="Regex pattern (e.g., 'semantic.*extract')"),
+        ],
+        result_limit=50
+    )
+    
+    # Tool 2: Get entity by qualified name
+    entity_query = (
+        session.table("api_df")
+        .filter(
+            (fc.col("is_public"))
+            & (fc.col("qualified_name") == fc.tool_param("qualified_name", StringType))
+        )
+        .select("type", "name", "qualified_name", "docstring", 
+                "annotation", "returns", "parameters", "filepath")
+    )
+    
+    session.catalog.create_tool(
+        tool_name="get_entity",
+        tool_description="Get detailed information about a specific API entity",
+        tool_query=entity_query,
+        tool_params=[
+            ToolParam(
+                name="qualified_name",
+                description="Fully qualified name (e.g., 'fenic.api.dataframe.DataFrame.select')"
+            ),
+        ],
+        result_limit=1
+    )
+
+def main():
+    session = setup_session()
+    register_search_tools(session)
+    
+    tools = session.catalog.list_tools()
+    
+    server = create_mcp_server(
+        session=session,
+        server_name="Fenic Documentation Server",
+        user_defined_tools=tools,
+        concurrency_limit=8
+    )
+    
+    server.run(transport="http", host="127.0.0.1", port=8000)
+
+if __name__ == "__main__":
+    main()
+```
+
+```python Table Population
+# populate_tables.py - separate script to build doc tables
+import fenic as fc
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="docs"))
+
+# Parse codebase and extract API metadata
+api_data = extract_api_metadata("/path/to/fenic/src")
+
+api_df = session.create_dataframe(api_data)
+api_df.write.save_as_table("api_df", mode="overwrite")
+
+# Build hierarchy for navigation
+hierarchy_df = build_api_hierarchy(api_df)
+hierarchy_df.write.save_as_table("hierarchy_df", mode="overwrite")
+
+# Create project summary
+summary_df = session.create_dataframe([{
+    "project_summary": "Fenic is a context engine for AI agents..."
+}])
+summary_df.write.save_as_table("fenic_summary", mode="overwrite")
+```
+</CodeGroup>
+
+## Transport Options
+
+### HTTP Transport (Recommended for Development)
+
+```python
+server.run(
+    transport="http",
+    host="127.0.0.1",
+    port=8000,
+    stateless_http=True  # Each request is independent
+)
+```
+
+Configure MCP client:
+```json
+{
+  "mcpServers": {
+    "fenic-docs": {
+      "url": "http://127.0.0.1:8000"
+    }
+  }
+}
+```
+
+### Stdio Transport (CLI Integration)
+
+```python
+server.run(transport="stdio")
+```
+
+Configure MCP client:
+```json
+{
+  "mcpServers": {
+    "fenic-docs": {
+      "command": "python",
+      "args": ["path/to/server.py"]
+    }
+  }
+}
+```
+
+## Semantic Operations in Tools
+
+Combine Fenic's semantic capabilities with MCP tools:
+
+```python
+from pydantic import BaseModel, Field
+
+class QAPair(BaseModel):
+    question: str = Field(description="Extracted question")
+    answer: str = Field(description="Extracted answer")
+
+# Build semantic context table
+qa_pairs = (
+    session.read.pdf_metadata("policies/*.pdf")
+    .select(
+        fc.col("file_path").alias("source"),
+        fc.semantic.parse_pdf(fc.col("file_path")).alias("content")
+    )
+    .select(
+        fc.col("source"),
+        fc.semantic.extract(
+            fc.col("content").cast(fc.StringType), 
+            QAPair
+        ).alias("qa")
+    )
+    .unnest("qa")
+    .select(
+        "source",
+        "question",
+        "answer",
+        fc.semantic.embed(fc.col("question")).alias("embedding")
+    )
+)
+qa_pairs.write.save_as_table("policy_qa", mode="overwrite")
+
+# Create semantic search tool
+def semantic_search(query: str, k: int = 5):
+    q = session.create_dataframe([{"q": query}])
+    return q.semantic.sim_join(
+        session.table("policy_qa"),
+        left_on=fc.semantic.embed(fc.col("q")),
+        right_on=fc.col("embedding"),
+        k=k,
+        similarity_score_column="relevance"
+    ).select("question", "answer", "source", "relevance")._plan
+
+# Register as system tool
+from fenic.core.mcp.types import SystemTool
+
+server = create_mcp_server(
+    session=session,
+    server_name="Semantic Policy Server",
+    system_tools=[
+        SystemTool(
+            name="semantic_search",
+            description="Search policies using semantic similarity",
+            func=semantic_search,
+            max_result_limit=10
+        )
+    ]
+)
+```
+
+## Advanced Configuration
+
+### Concurrency Control
+
+```python
+server = create_mcp_server(
+    session=session,
+    server_name="My Server",
+    table_names=["data"],
+    concurrency_limit=8  # Max 8 concurrent tool executions
+)
+```
+
+### Result Limits
+
+Control maximum results returned by tools:
+
+```python
+from fenic.api.mcp._tool_generation_utils import auto_generate_system_tools_from_tables
+
+tools = auto_generate_system_tools_from_tables(
+    table_names=["large_table"],
+    session=session,
+    tool_namespace="data",
+    max_result_limit=100  # Cap at 100 rows
+)
+
+server = create_mcp_server(
+    session=session,
+    server_name="Limited Server",
+    system_tools=tools
+)
+```
+
+### Table Descriptions
+
+MCP tools use table descriptions to help agents understand data:
+
+```python
+# Set table description
+session.catalog.set_table_description(
+    "policy_qa",
+    "Policy Q&A pairs extracted from company policy documents. "
+    "Use for answering customer questions about policies."
+)
+
+# Create tools - descriptions are automatically included
+server = create_mcp_server(
+    session=session,
+    server_name="Policy Server",
+    table_names=["policy_qa"]
+)
+```
+
+## Error Handling
+
+```python
+from fastmcp.exceptions import ToolError
+
+def custom_tool(query: str):
+    if not query:
+        raise ToolError("Query parameter cannot be empty")
+    
+    try:
+        result = session.table("data").filter(
+            fc.col("text").rlike(query)
+        )
+        return result._plan
+    except Exception as e:
+        raise ToolError(f"Search failed: {str(e)}") from e
+```
+
+## Production Deployment
+
+### ASGI/Uvicorn
+
+```python
+# server.py
+from fenic.api.mcp import create_mcp_server
+
+session = setup_session()
+server = create_mcp_server(session=session, table_names=["data"])
+
+# Export ASGI app
+app = server.http_app()
+
+# Run with: uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+### Docker
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY server.py .
+COPY data/ ./data/
+
+ENV FENIC_WORK_DIR=/data/fenic
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+## MCP Client Configuration Examples
+
+<Tabs>
+  <Tab title="Claude Desktop">
+    ```json
+    {
+      "mcpServers": {
+        "fenic-docs": {
+          "url": "http://localhost:8000"
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Cline/VSCode">
+    ```json
+    {
+      "mcp": {
+        "servers": {
+          "fenic-docs": {
+            "type": "http",
+            "url": "http://localhost:8000"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Stdio (CLI)">
+    ```json
+    {
+      "mcpServers": {
+        "fenic-docs": {
+          "command": "python",
+          "args": ["server.py"],
+          "env": {
+            "FENIC_WORK_DIR": "/path/to/data"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Note>
+**Performance**
+- Use `result_limit` to cap tool results and reduce token usage
+- Index frequently queried columns in your tables
+- Consider caching for expensive semantic operations
+- Use `concurrency_limit` to prevent resource exhaustion
+</Note>
+
+<Note>
+**Security**
+- Run servers on localhost or behind authentication
+- Validate all tool inputs (Fenic validates automatically)
+- Use read-only tools when possible
+- Set appropriate `max_result_limit` to prevent data leaks
+</Note>
+
+<Note>
+**Agent Design**
+- Provide clear tool descriptions to guide agents
+- Use table descriptions to explain data semantics
+- Start agents with Schema/Profile tools before querying
+- Design tools for specific use cases rather than generic access
+</Note>
+
+## Troubleshooting
+
+### Server Won't Start
+
+```python
+# Check if port is already in use
+import socket
+sock = socket.socket()
+try:
+    sock.bind(('127.0.0.1', 8000))
+    print("Port available")
+except OSError:
+    print("Port 8000 in use")
+finally:
+    sock.close()
+```
+
+### Tools Not Appearing
+
+```python
+# Verify tools are registered
+session = setup_session()
+tools = session.catalog.list_tools()
+for tool in tools:
+    print(f"Tool: {tool.name} - {tool.description}")
+```
+
+### Table Not Found
+
+```python
+# Check table exists
+if not session.catalog.does_table_exist("my_table"):
+    print("Table missing - run population script")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent Frameworks" icon="robot" href="/integrations/agent-frameworks">
+    Integrate Fenic with LangGraph, PydanticAI, and more
+  </Card>
+  <Card title="LLM Providers" icon="brain" href="/integrations/llm-providers">
+    Configure semantic operations with OpenAI, Anthropic, etc.
+  </Card>
+</CardGroup>

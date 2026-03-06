@@ -1,0 +1,327 @@
+---
+title: Semantic Types
+description: Types for configuring model selection and semantic operations
+---
+
+Semantic types provide configuration options for LLM-powered operations in Fenic, including model selection, profile configuration, and document parsing.
+
+## Model Configuration
+
+### ModelAlias
+
+A combination of a model name and a required profile for that model. Model aliases are used to select specific models and their configurations in semantic operations.
+
+<ParamField path="name" type="str" required>
+  The name of the model (e.g., `"gpt-4o"`, `"claude-3-5-sonnet-20241022"`).
+</ParamField>
+
+<ParamField path="profile" type="str" required>
+  The name of a profile configuration to use for the model.
+</ParamField>
+
+#### Example
+
+```python
+from fenic.core.types.semantic import ModelAlias
+
+# Create a model alias with a specific profile
+model_alias = ModelAlias(name="gpt-4o-mini", profile="low_cost")
+
+# Use in semantic operations
+df = df.semantic.map(
+    input_col="text",
+    output_col="summary",
+    instruction="Summarize this text",
+    model=model_alias
+)
+```
+
+### String Model Names
+
+You can also specify models as strings in semantic operations:
+
+```python
+# Use model name directly
+df = df.semantic.map(
+    input_col="text",
+    output_col="summary",
+    instruction="Summarize this text",
+    model="gpt-4o-mini"  # String model name
+)
+```
+
+---
+
+## Document Parsing
+
+### ParsingEngine
+
+Specifies the engine to use for parsing documents (especially PDFs).
+
+**Type:** `Literal["mistral-ocr", "pdf-text", "native"]`
+
+- `"mistral-ocr"`: Use Mistral's OCR capabilities for PDF parsing
+- `"pdf-text"`: Extract text directly from PDF
+- `"native"`: Use native parsing methods
+
+#### Example
+
+```python
+import fenic as fc
+from fenic.core.types.semantic import ParsingEngine
+
+# Use with document extraction
+df = session.create_dataframe({
+    "file_path": ["document.pdf"]
+})
+
+df = df.semantic.extract_from_document(
+    input_col="file_path",
+    output_col="content",
+    parsing_engine="mistral-ocr"  # Specify parsing engine
+)
+```
+
+---
+
+## Using Model Configuration
+
+### Basic Model Selection
+
+<CodeGroup>
+```python String model name
+import fenic as fc
+
+df = session.create_dataframe({
+    "text": ["Hello world", "Fenic is great"]
+})
+
+# Use string model name
+df = df.semantic.map(
+    input_col="text",
+    output_col="sentiment",
+    instruction="Classify sentiment as positive, negative, or neutral",
+    model="gpt-4o-mini"
+)
+```
+
+```python Model alias with profile
+import fenic as fc
+from fenic.core.types.semantic import ModelAlias
+
+df = session.create_dataframe({
+    "text": ["Hello world", "Fenic is great"]
+})
+
+# Use model alias with profile
+model = ModelAlias(name="gpt-4o-mini", profile="fast")
+
+df = df.semantic.map(
+    input_col="text",
+    output_col="sentiment",
+    instruction="Classify sentiment as positive, negative, or neutral",
+    model=model
+)
+```
+</CodeGroup>
+
+### Model Selection Across Operations
+
+Models can be specified for various semantic operations:
+
+<CodeGroup>
+```python semantic.extract()
+from pydantic import BaseModel
+
+class Person(BaseModel):
+    name: str
+    age: int
+
+df = df.semantic.extract(
+    input_col="bio",
+    schema=Person,
+    model="gpt-4o"
+)
+```
+
+```python semantic.classify()
+from fenic import ClassDefinition
+
+classes = [
+    ClassDefinition(name="technical", description="Technical content"),
+    ClassDefinition(name="business", description="Business content")
+]
+
+df = df.semantic.classify(
+    input_col="text",
+    output_col="category",
+    classes=classes,
+    model="claude-3-5-sonnet-20241022"
+)
+```
+
+```python semantic.join()
+left_df = session.create_dataframe({"product": ["iPhone", "Galaxy"]})
+right_df = session.create_dataframe({"review": ["Great phone!", "Love it"]})
+
+result = left_df.semantic.join(
+    right_df,
+    left_on="product",
+    right_on="review",
+    instruction="Match products with relevant reviews",
+    model="gpt-4o-mini"
+)
+```
+
+```python semantic.embed()
+df = df.semantic.embed(
+    input_col="text",
+    output_col="embedding",
+    model="text-embedding-3-small"
+)
+```
+</CodeGroup>
+
+---
+
+## Model Profiles
+
+Profiles allow you to define reusable model configurations with specific parameters like temperature, max tokens, etc. Configure profiles in your session:
+
+```python
+import fenic as fc
+
+config = fc.SessionConfig(
+    app_name="my_app",
+    profiles={
+        "fast": {
+            "temperature": 0.3,
+            "max_tokens": 500
+        },
+        "creative": {
+            "temperature": 0.9,
+            "max_tokens": 2000
+        },
+        "precise": {
+            "temperature": 0.0,
+            "max_tokens": 1000
+        }
+    }
+)
+
+session = fc.Session.get_or_create(config)
+
+# Use profile with model
+from fenic.core.types.semantic import ModelAlias
+
+model = ModelAlias(name="gpt-4o", profile="creative")
+
+df = df.semantic.map(
+    input_col="prompt",
+    output_col="story",
+    instruction="Write a creative story",
+    model=model
+)
+```
+
+---
+
+## Default Models
+
+If no model is specified, Fenic uses default models for each operation:
+
+```python
+# Uses default model for the operation
+df = df.semantic.map(
+    input_col="text",
+    output_col="summary",
+    instruction="Summarize this text"
+    # model parameter omitted - uses default
+)
+```
+
+Default models are configured at the session level and can be overridden per operation.
+
+---
+
+## Supported Models
+
+Fenic supports models from multiple providers:
+
+### OpenAI
+- `gpt-4o`
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+- `text-embedding-3-small`
+- `text-embedding-3-large`
+
+### Anthropic
+- `claude-3-5-sonnet-20241022`
+- `claude-3-5-haiku-20241022`
+- `claude-3-opus-20240229`
+
+### Google
+- `gemini-2.0-flash-exp`
+- `gemini-1.5-pro`
+- `gemini-1.5-flash`
+
+### Mistral
+- `mistral-large-latest`
+- `mistral-small-latest`
+- `pixtral-large-latest` (with OCR support)
+
+<Note>
+Make sure to set the appropriate API keys as environment variables:
+- `OPENAI_API_KEY` for OpenAI models
+- `ANTHROPIC_API_KEY` for Anthropic models
+- `GOOGLE_API_KEY` for Google models
+- `MISTRAL_API_KEY` for Mistral models
+</Note>
+
+---
+
+## Best Practices
+
+### Choose Models Based on Use Case
+
+- **Fast operations**: Use smaller models like `gpt-4o-mini` or `claude-3-5-haiku-20241022`
+- **Complex reasoning**: Use larger models like `gpt-4o` or `claude-3-5-sonnet-20241022`
+- **Embeddings**: Use specialized models like `text-embedding-3-small`
+- **Document OCR**: Use `pixtral-large-latest` with `mistral-ocr` parsing
+
+### Use Profiles for Consistency
+
+Define profiles to ensure consistent model behavior across your application:
+
+```python
+config = fc.SessionConfig(
+    app_name="my_app",
+    profiles={
+        "production": {
+            "temperature": 0.0,
+            "max_tokens": 1000
+        }
+    }
+)
+
+# All operations using this profile will have the same settings
+model = ModelAlias(name="gpt-4o", profile="production")
+```
+
+### Consider Cost vs Performance
+
+Balance cost and performance by choosing appropriate models:
+
+```python
+# Low-cost operations
+low_cost_model = ModelAlias(name="gpt-4o-mini", profile="fast")
+
+# High-quality operations
+high_quality_model = ModelAlias(name="gpt-4o", profile="precise")
+```
+
+## See Also
+
+- [Semantic Operations](/concepts/semantic-operators) - Using semantic operations
+- [Data Types](/api/types/data-types) - Core data types
+- [Session Configuration](/api/session) - Configuring sessions and profiles

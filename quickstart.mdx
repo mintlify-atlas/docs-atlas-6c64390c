@@ -1,80 +1,466 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build your first Fenic context pipeline in 5 minutes
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through creating your first Fenic application: an error log analyzer that extracts structured information from unstructured logs using semantic operations.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+<Steps>
+  <Step title="Install Fenic">
+    ```bash
+    pip install fenic
+    ```
+  </Step>
+  
+  <Step title="Set your OpenAI API key">
+    ```bash
+    export OPENAI_API_KEY="sk-..."
+    ```
+  </Step>
+</Steps>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  This quickstart uses OpenAI's GPT-4o-mini model. You can use other providers by following the [Installation guide](/installation).
+</Note>
+
+## Your First Pipeline
+
+Create a file called `error_analyzer.py`:
+
+```python error_analyzer.py
+from pydantic import BaseModel, Field
+import fenic as fc
+
+# Define the structure we want to extract
+class ErrorAnalysis(BaseModel):
+    root_cause: str = Field(description="The root cause of this error")
+    fix_recommendation: str = Field(description="How to fix this error")
+
+# 1. Create session with semantic capabilities
+session = fc.Session.get_or_create(
+    fc.SessionConfig(
+        app_name="error_analyzer",
+        semantic=fc.SemanticConfig(
+            language_models={
+                "mini": fc.OpenAILanguageModel(
+                    model_name="gpt-4o-mini",
+                    rpm=500,
+                    tpm=200_000
+                )
+            }
+        )
+    )
+)
+
+# 2. Load sample error logs
+error_logs = [
+    {
+        "timestamp": "2024-01-20 14:23:45",
+        "service": "api-gateway",
+        "error_log": """
+ERROR: NullPointerException in UserService.getProfile()
+    at com.app.UserService.getProfile(UserService.java:45)
+User ID: 12345 was not found in cache, attempted DB lookup returned null
+        """
+    },
+    {
+        "timestamp": "2024-01-20 14:24:12",
+        "service": "auth-service",
+        "error_log": """
+Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1494:16)
+Redis connection failed during session validation
+        """
+    }
+]
+
+df = session.create_dataframe(error_logs)
+
+# 3. Analyze errors using semantic operations
+df_analyzed = df.select(
+    "timestamp",
+    "service",
+    fc.semantic.classify(
+        "error_log",
+        ["low", "medium", "high", "critical"]
+    ).alias("severity"),
+    fc.semantic.extract(
+        "error_log",
+        ErrorAnalysis
+    ).alias("analysis")
+)
+
+# 4. Display results
+result = df_analyzed.select(
+    "timestamp",
+    "service",
+    "severity",
+    df_analyzed.analysis.root_cause.alias("root_cause"),
+    df_analyzed.analysis.fix_recommendation.alias("fix")
+)
+
+result.show()
+
+# Clean up
+session.stop()
+```
+
+## Run Your Pipeline
+
+```bash
+python error_analyzer.py
+```
+
+You should see output like:
+
+```
+┌────────────────────┬──────────────┬──────────┬─────────────────────────────┬─────────────────────────────┐
+│ timestamp          │ service      │ severity │ root_cause                  │ fix                         │
+├────────────────────┼──────────────┼──────────┼─────────────────────────────┼─────────────────────────────┤
+│ 2024-01-20 14:23:45│ api-gateway  │ high     │ User not found in cache/DB  │ Add null checks and logging │
+│ 2024-01-20 14:24:12│ auth-service │ critical │ Redis connection refused    │ Check Redis service status  │
+└────────────────────┴──────────────┴──────────┴─────────────────────────────┴─────────────────────────────┘
+```
+
+## Understanding the Code
+
+Let's break down what's happening:
+
+<Steps>
+  <Step title="Define Schema">
+    Use Pydantic models to define the structure you want to extract:
+    
+    ```python
+    class ErrorAnalysis(BaseModel):
+        root_cause: str = Field(description="The root cause of this error")
+        fix_recommendation: str = Field(description="How to fix this error")
+    ```
+    
+    Field descriptions guide the LLM on what to extract.
+  </Step>
+  
+  <Step title="Create Session">
+    The session manages configuration and execution:
+    
+    ```python
+    session = fc.Session.get_or_create(
+        fc.SessionConfig(
+            app_name="error_analyzer",
+            semantic=fc.SemanticConfig(
+                language_models={"mini": fc.OpenAILanguageModel(...)}
+            )
+        )
+    )
+    ```
+  </Step>
+  
+  <Step title="Load Data">
+    Create a DataFrame from your data:
+    
+    ```python
+    df = session.create_dataframe(error_logs)
+    ```
+    
+    Fenic supports CSV, JSON, Parquet, Pandas/Polars DataFrames, and more.
+  </Step>
+  
+  <Step title="Apply Semantic Operations">
+    Use semantic operators to process unstructured data:
+    
+    ```python
+    fc.semantic.classify("error_log", ["low", "medium", "high", "critical"])
+    fc.semantic.extract("error_log", ErrorAnalysis)
+    ```
+    
+    These operations happen **outside your agent's context window**.
+  </Step>
+  
+  <Step title="Access Nested Fields">
+    Extract fields from structured data:
+    
+    ```python
+    df_analyzed.analysis.root_cause.alias("root_cause")
+    ```
+    
+    Use dot notation to access Pydantic model fields.
+  </Step>
+</Steps>
+
+## Key Semantic Operations
+
+Fenic provides several semantic operators:
+
+### Extract
+
+Extract structured data from text using Pydantic schemas:
+
+```python
+fc.semantic.extract(
+    fc.col("text"),
+    MyPydanticSchema
+).alias("structured_data")
+```
+
+### Classify
+
+Classify text into predefined categories:
+
+```python
+fc.semantic.classify(
+    fc.col("text"),
+    ["positive", "negative", "neutral"]
+).alias("sentiment")
+```
+
+### Embed
+
+Generate embeddings for semantic search:
+
+```python
+fc.semantic.embed(
+    fc.col("text")
+).alias("embedding")
+```
+
+### Map
+
+Transform text using LLM templates:
+
+```python
+fc.semantic.map(
+    "Summarize this in one sentence: {{ text }}",
+    text=fc.col("content")
+).alias("summary")
+```
+
+## Combining with Deterministic Operations
+
+Fenic shines when you combine semantic operations with traditional DataFrame operations:
+
+```python
+result = (
+    df.select(
+        fc.col("timestamp"),
+        fc.semantic.extract(fc.col("log"), ErrorSchema).alias("error")
+    )
+    .filter(fc.col("error").severity == "critical")  # Deterministic filter
+    .sort(fc.col("timestamp").desc())                # Deterministic sort
+    .limit(10)                                        # Deterministic limit
+)
+```
+
+<Note>
+  Semantic operations (extract, classify, embed) use LLMs and cost tokens. Deterministic operations (filter, sort, limit) are free and fast.
+</Note>
+
+## Working with PDFs
+
+Fenic can parse PDFs directly:
+
+```python
+from pydantic import BaseModel, Field
+
+class QAPair(BaseModel):
+    question: str = Field(description="A question from the document")
+    answer: str = Field(description="The answer to the question")
+
+# Parse PDF and extract Q&A pairs
+qa_df = (
+    session.read.pdf_metadata("policies/*.pdf")
+    .select(
+        fc.col("file_path").alias("source"),
+        fc.semantic.parse_pdf(fc.col("file_path")).alias("content")
+    )
+    .select(
+        fc.col("source"),
+        fc.semantic.extract(
+            fc.col("content").cast(fc.StringType),
+            QAPair
+        ).alias("qa")
+    )
+    .unnest("qa")  # Flatten the nested structure
+)
+
+qa_df.show()
+```
+
+## Semantic Search
+
+Create a semantic search pipeline:
+
+```python
+# 1. Embed your documents
+docs = session.create_dataframe([
+    {"id": 1, "text": "Python is a programming language"},
+    {"id": 2, "text": "Machine learning uses algorithms"},
+    {"id": 3, "text": "Databases store structured data"}
+])
+
+docs_with_embeddings = docs.select(
+    "id",
+    "text",
+    fc.semantic.embed(fc.col("text")).alias("embedding")
+)
+
+# 2. Save as table
+docs_with_embeddings.write.save_as_table("documents", mode="overwrite")
+
+# 3. Query with semantic similarity
+query = session.create_dataframe([{"query": "What is coding?"}])
+
+results = query.semantic.sim_join(
+    session.table("documents"),
+    left_on=fc.semantic.embed(fc.col("query")),
+    right_on=fc.col("embedding"),
+    k=2,  # Top 2 results
+    similarity_score_column="score"
+).select("text", "score")
+
+results.show()
+```
+
+## Saving Results
+
+Fenic supports multiple output formats:
+
+<CodeGroup>
+```python Save as Table
+# Save to Fenic's native storage
+df.write.save_as_table("my_table", mode="overwrite")
+
+# Load later
+loaded = session.table("my_table")
+```
+
+```python Export to Parquet
+# Save to Parquet file
+df.write.parquet("output.parquet")
+```
+
+```python Export to CSV
+# Save to CSV file
+df.write.csv("output.csv")
+```
+
+```python Collect to Python
+# Get results as Python objects
+results = df.collect()
+for row in results:
+    print(row)
+```
+</CodeGroup>
+
+## Working with Multiple Models
+
+You can configure multiple models and choose which to use:
+
+```python
+session = fc.Session.get_or_create(
+    fc.SessionConfig(
+        app_name="multi_model",
+        semantic=fc.SemanticConfig(
+            language_models={
+                "fast": fc.OpenAILanguageModel(
+                    model_name="gpt-4o-mini",
+                    rpm=500,
+                    tpm=200_000
+                ),
+                "powerful": fc.OpenAILanguageModel(
+                    model_name="gpt-4o",
+                    rpm=100,
+                    tpm=100_000
+                )
+            },
+            default_language_model="fast"  # Use fast by default
+        )
+    )
+)
+
+# Use default model (fast)
+result1 = df.semantic.classify("text", ["a", "b", "c"])
+
+# Use specific model (powerful)
+result2 = df.semantic.extract(
+    "text",
+    ComplexSchema,
+    model="powerful"  # Override default
+)
+```
+
+## Token Tracking
+
+Fenic tracks token usage and costs:
+
+```python
+metrics = df_analyzed.write.save_as_table("results", mode="overwrite")
+
+print(f"Total cost: ${metrics.total_lm_metrics.cost:.4f}")
+print(f"Input tokens: {metrics.total_lm_metrics.num_uncached_input_tokens}")
+print(f"Output tokens: {metrics.total_lm_metrics.num_output_tokens}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/concepts/sessions">
+    Learn about Sessions, DataFrames, and Semantic Operations
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/session">
+    Explore all available functions and operators
+  </Card>
+  
+  <Card title="Examples" icon="flask" href="/examples/hello-world">
+    Browse real-world examples and use cases
+  </Card>
+  
+  <Card title="MCP Integration" icon="plug" href="/integrations/mcp-server">
+    Expose Fenic pipelines as MCP tools for agents
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### Pattern 1: Extract → Filter → Aggregate
+
+```python
+results = (
+    df.semantic.extract("text", MySchema)
+    .filter(fc.col("extracted").field == "value")
+    .group_by("category")
+    .agg(fc.count("*").alias("count"))
+)
+```
+
+### Pattern 2: Parse → Embed → Search
+
+```python
+# Index phase
+indexed = (
+    session.read.pdf_metadata("docs/*.pdf")
+    .semantic.parse_pdf()
+    .semantic.embed()
+)
+indexed.write.save_as_table("index")
+
+# Search phase
+results = query.semantic.sim_join(session.table("index"), k=5)
+```
+
+### Pattern 3: Classify → Route → Process
+
+```python
+routed = df.semantic.classify("text", ["urgent", "normal", "low"])
+
+urgent = routed.filter(fc.col("class") == "urgent")
+normal = routed.filter(fc.col("class") == "normal")
+low = routed.filter(fc.col("class") == "low")
+```
+
+<Note>
+  All semantic operations are lazy—they only execute when you call `.show()`, `.collect()`, `.write.save_as_table()`, or other action methods.
 </Note>

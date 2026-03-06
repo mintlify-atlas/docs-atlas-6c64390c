@@ -1,0 +1,137 @@
+---
+title: Embedding Functions
+description: Functions for working with embedding vectors
+---
+
+Embedding functions provide tools for normalizing and computing similarity between embedding vectors. All functions are available via `fc.embedding.*`.
+
+## normalize
+
+Normalize embedding vectors to unit length.
+
+```python
+fc.embedding.normalize(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing embedding vectors.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of normalized embedding vectors with the same embedding type.
+</ResponseField>
+
+<Note>
+- Normalizes each embedding vector to have unit length (L2 norm = 1)
+- Preserves the original embedding model in the type
+- Null values are preserved as null
+- Zero vectors become NaN after normalization
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Normalize embeddings for dot product similarity
+df.select(
+    fc.embedding.normalize(fc.col("embeddings")).alias("unit_embeddings")
+)
+```
+
+```python Compare normalized embeddings using dot product
+normalized_df = df.select(
+    fc.embedding.normalize(fc.col("embeddings")).alias("norm_emb")
+)
+
+query = [0.6, 0.8]  # Already normalized
+normalized_df.select(
+    fc.embedding.compute_similarity(
+        fc.col("norm_emb"),
+        query,
+        metric="dot"
+    ).alias("dot_product_sim")
+)
+```
+</CodeGroup>
+
+---
+
+## compute_similarity
+
+Compute similarity between embedding vectors using specified metric.
+
+```python
+fc.embedding.compute_similarity(
+    column: ColumnOrName,
+    other: Union[ColumnOrName, List[float], np.ndarray],
+    metric: SemanticSimilarityMetric = "cosine"
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing embedding vectors.
+</ParamField>
+
+<ParamField path="other" type="Union[ColumnOrName, List[float], np.ndarray]" required>
+  Either:
+  - Another column containing embedding vectors for pairwise similarity
+  - A query vector (list of floats or numpy array) for similarity with each embedding
+</ParamField>
+
+<ParamField path="metric" type="SemanticSimilarityMetric" default="cosine">
+  The similarity metric to use:
+  - `cosine`: Cosine similarity (range: -1 to 1, higher is more similar)
+  - `dot`: Dot product similarity (raw inner product)
+  - `l2`: L2 (Euclidean) distance (lower is more similar)
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of float values representing similarity scores.
+</ResponseField>
+
+<Note>
+- Cosine similarity normalizes vectors internally, so pre-normalization is not required
+- Dot product does not normalize, useful when vectors are already normalized
+- L2 distance measures the straight-line distance between vectors
+- When using two columns, dimensions must match between embeddings
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Compute dot product with a query vector
+query = [0.1, 0.2, 0.3]
+df.select(
+    fc.embedding.compute_similarity(
+        fc.col("embeddings"),
+        query
+    ).alias("similarity")
+)
+```
+
+```python Compute cosine similarity with a query vector
+query = [0.6, 0.8]  # Already normalized
+df.select(
+    fc.embedding.compute_similarity(
+        fc.col("embeddings"),
+        query,
+        metric="cosine"
+    ).alias("cosine_sim")
+)
+```
+
+```python Compute pairwise L2 distance between columns
+df.select(
+    fc.embedding.compute_similarity(
+        fc.col("embeddings1"),
+        fc.col("embeddings2"),
+        metric="l2"
+    ).alias("distance")
+)
+```
+
+```python Using numpy array as query vector
+import numpy as np
+query = np.array([0.1, 0.2, 0.3])
+df.select(fc.embedding.compute_similarity("embeddings", query))
+```
+</CodeGroup>

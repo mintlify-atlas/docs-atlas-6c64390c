@@ -1,0 +1,727 @@
+---
+title: Text Functions
+description: Text manipulation and chunking functions for working with strings
+---
+
+Text functions provide string manipulation, chunking, template rendering, and text extraction capabilities. All functions are available via `fc.text.*`.
+
+## Chunking Functions
+
+### recursive_character_chunk
+
+Chunks a string column into chunks of a specified size (in characters) with an optional overlap, preserving text structure.
+
+```python
+fc.text.recursive_character_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int,
+    chunking_character_set_custom_characters: Optional[list[str]] = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column or column name to chunk.
+</ParamField>
+
+<ParamField path="chunk_size" type="int" required>
+  The size of each chunk in characters.
+</ParamField>
+
+<ParamField path="chunk_overlap_percentage" type="int" required>
+  The overlap between each chunk as a percentage of the chunk size.
+</ParamField>
+
+<ParamField path="chunking_character_set_custom_characters" type="Optional[list[str]]">
+  List of alternative characters to split on. Characters should be ordered from coarsest to finest desired granularity. Default is `['\n\n', '\n', '.', ';', ':', ' ', '-', '']`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the chunks as an array of strings.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.text.recursive_character_chunk(fc.col("text"), 100, 20).alias("chunks")
+)
+```
+
+---
+
+### recursive_word_chunk
+
+Chunks a string column into chunks of a specified size (in words) with an optional overlap.
+
+```python
+fc.text.recursive_word_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int,
+    chunking_character_set_custom_characters: Optional[list[str]] = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column or column name to chunk.
+</ParamField>
+
+<ParamField path="chunk_size" type="int" required>
+  The size of each chunk in words.
+</ParamField>
+
+<ParamField path="chunk_overlap_percentage" type="int" required>
+  The overlap between each chunk as a percentage of the chunk size.
+</ParamField>
+
+<ParamField path="chunking_character_set_custom_characters" type="Optional[list[str]]">
+  List of alternative characters to split on.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the chunks as an array of strings.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.text.recursive_word_chunk(fc.col("text"), 100, 20).alias("chunks")
+)
+```
+
+---
+
+### recursive_token_chunk
+
+Chunks a string column into chunks of a specified size (in tokens) with an optional overlap.
+
+```python
+fc.text.recursive_token_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int,
+    chunking_character_set_custom_characters: Optional[list[str]] = None,
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column or column name to chunk.
+</ParamField>
+
+<ParamField path="chunk_size" type="int" required>
+  The size of each chunk in tokens.
+</ParamField>
+
+<ParamField path="chunk_overlap_percentage" type="int" required>
+  The overlap between each chunk as a percentage of the chunk size.
+</ParamField>
+
+<ParamField path="chunking_character_set_custom_characters" type="Optional[list[str]]">
+  List of alternative characters to split on.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the chunks as an array of strings.
+</ResponseField>
+
+### Example
+
+```python
+df.select(
+    fc.text.recursive_token_chunk(fc.col("text"), 100, 20).alias("chunks")
+)
+```
+
+---
+
+### character_chunk
+
+Chunks a string column into chunks of a specified size (in characters) with an optional overlap using a simple sliding window.
+
+```python
+fc.text.character_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int = 0
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column or column name to chunk.
+</ParamField>
+
+<ParamField path="chunk_size" type="int" required>
+  The size of each chunk in characters.
+</ParamField>
+
+<ParamField path="chunk_overlap_percentage" type="int" default="0">
+  The overlap between chunks as a percentage of the chunk size.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the chunks as an array of strings.
+</ResponseField>
+
+---
+
+### word_chunk
+
+Chunks a string column into chunks of a specified size (in words) with an optional overlap using a simple sliding window.
+
+```python
+fc.text.word_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int = 0
+) -> Column
+```
+
+---
+
+### token_chunk
+
+Chunks a string column into chunks of a specified size (in tokens) with an optional overlap using a simple sliding window.
+
+```python
+fc.text.token_chunk(
+    column: ColumnOrName,
+    chunk_size: int,
+    chunk_overlap_percentage: int = 0
+) -> Column
+```
+
+---
+
+### count_tokens
+
+Returns the number of tokens in a string using OpenAI's cl100k_base encoding (tiktoken).
+
+```python
+fc.text.count_tokens(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column with the token counts for each input string.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.count_tokens(fc.col("text")))
+```
+
+---
+
+## String Manipulation
+
+### extract
+
+Extracts structured data from text using template-based pattern matching.
+
+```python
+fc.text.extract(column: ColumnOrName, template: str) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input text column to extract from.
+</ParamField>
+
+<ParamField path="template" type="str" required>
+  Template string with placeholders as `${field_name}` or `${field_name:format}`. Available formats: none, csv, json, quoted.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  Struct column with fields corresponding to template placeholders.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+```python Basic extraction
+fc.text.extract(fc.col("log"), "${date} ${level} ${message}")
+# Input: "2024-01-15 ERROR Connection failed"
+# Output: {date: "2024-01-15", level: "ERROR", message: "Connection failed"}
+```
+
+```python Mixed format extraction
+fc.text.extract(
+    fc.col("data"),
+    'Name: ${name:csv}, Price: ${price}, Tags: ${tags:json}'
+)
+# Input: 'Name: "Smith, John", Price: 99.99, Tags: ["a", "b"]'
+# Output: {name: "Smith, John", price: "99.99", tags: ["a", "b"]}
+```
+</CodeGroup>
+
+---
+
+### concat
+
+Concatenates multiple columns or strings into a single string.
+
+```python
+fc.text.concat(*cols: ColumnOrName) -> Column
+```
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  Columns or strings to concatenate.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the concatenated strings.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.concat(fc.col("col1"), fc.lit(" "), fc.col("col2")))
+```
+
+---
+
+### concat_ws
+
+Concatenates multiple columns or strings into a single string with a separator.
+
+```python
+fc.text.concat_ws(separator: str, *cols: ColumnOrName) -> Column
+```
+
+<ParamField path="separator" type="str" required>
+  The separator to use.
+</ParamField>
+
+<ParamField path="*cols" type="ColumnOrName" required>
+  Columns or strings to concatenate.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the concatenated strings.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.concat_ws(",", fc.col("col1"), fc.col("col2")))
+```
+
+---
+
+### replace
+
+Replace all occurrences of a pattern with a new string, treating pattern as a literal string.
+
+```python
+fc.text.replace(
+    src: ColumnOrName,
+    search: Union[Column, str],
+    replace: Union[Column, str]
+) -> Column
+```
+
+<ParamField path="src" type="ColumnOrName" required>
+  The input string column or column name to perform replacements on.
+</ParamField>
+
+<ParamField path="search" type="Union[Column, str]" required>
+  The pattern to search for (can be a string or column expression).
+</ParamField>
+
+<ParamField path="replace" type="Union[Column, str]" required>
+  The string to replace with (can be a string or column expression).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the strings with replacements applied.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.replace(fc.col("name"), "foo", "bar"))
+```
+
+---
+
+### regexp_replace
+
+Replace all occurrences of a pattern with a new string, treating pattern as a regular expression.
+
+```python
+fc.text.regexp_replace(
+    src: ColumnOrName,
+    pattern: Union[Column, str],
+    replacement: Union[Column, str],
+) -> Column
+```
+
+<ParamField path="src" type="ColumnOrName" required>
+  The input string column or column name to perform replacements on.
+</ParamField>
+
+<ParamField path="pattern" type="Union[Column, str]" required>
+  The regular expression pattern to search for.
+</ParamField>
+
+<ParamField path="replacement" type="Union[Column, str]" required>
+  The string to replace with.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing the strings with replacements applied.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.regexp_replace(fc.col("text"), r"\d+", "--"))
+```
+
+---
+
+## Regular Expressions
+
+### regexp_count
+
+Count the number of times a regex pattern is matched in a string.
+
+```python
+fc.text.regexp_count(src: ColumnOrName, pattern: Union[Column, str]) -> Column
+```
+
+---
+
+### regexp_extract
+
+Extract a specific regex group from a string.
+
+```python
+fc.text.regexp_extract(
+    src: ColumnOrName,
+    pattern: Union[Column, str],
+    idx: int
+) -> Column
+```
+
+<ParamField path="idx" type="int" required>
+  The group index to extract (0 = entire match, 1+ = capture groups).
+</ParamField>
+
+### Example
+
+```python
+fc.text.regexp_extract("email", r"([^@]+)@", 1)
+# Input: "user@domain.com"
+# Output: "user"
+```
+
+---
+
+### regexp_extract_all
+
+Extract all strings matching a regex pattern, optionally from a specific group.
+
+```python
+fc.text.regexp_extract_all(
+    src: ColumnOrName,
+    pattern: Union[Column, str],
+    idx: Union[Column, int] = 0
+) -> Column
+```
+
+<ResponseField name="return" type="Column">
+  An array column containing all matches.
+</ResponseField>
+
+### Example
+
+```python
+fc.text.regexp_extract_all("text", r"\d+")
+# Input: "abc123def456"
+# Output: ["123", "456"]
+```
+
+---
+
+### split
+
+Split a string column into an array using a regular expression pattern.
+
+```python
+fc.text.split(src: ColumnOrName, pattern: str, limit: int = -1) -> Column
+```
+
+<ParamField path="pattern" type="str" required>
+  The regular expression pattern to split on.
+</ParamField>
+
+<ParamField path="limit" type="int" default="-1">
+  Maximum number of splits to perform. If > 0, returns at most limit+1 elements.
+</ParamField>
+
+### Example
+
+```python
+df.select(fc.text.split(fc.col("text"), r"\s+"))
+```
+
+---
+
+### split_part
+
+Split a string and return a specific part using 1-based indexing.
+
+```python
+fc.text.split_part(
+    src: ColumnOrName,
+    delimiter: Union[Column, str],
+    part_number: Union[Column, int]
+) -> Column
+```
+
+<ParamField path="delimiter" type="Union[Column, str]" required>
+  The delimiter to split on.
+</ParamField>
+
+<ParamField path="part_number" type="Union[Column, int]" required>
+  Which part to return (1-based integer index). Negative values count from the end.
+</ParamField>
+
+### Example
+
+```python
+df.select(fc.text.split_part(fc.col("text"), ",", 2))
+```
+
+---
+
+## String Transformations
+
+### upper
+
+Convert all characters in a string column to uppercase.
+
+```python
+fc.text.upper(column: ColumnOrName) -> Column
+```
+
+---
+
+### lower
+
+Convert all characters in a string column to lowercase.
+
+```python
+fc.text.lower(column: ColumnOrName) -> Column
+```
+
+---
+
+### title_case
+
+Convert the first character of each word in a string column to uppercase.
+
+```python
+fc.text.title_case(column: ColumnOrName) -> Column
+```
+
+---
+
+### trim
+
+Remove whitespace from both sides of strings in a column.
+
+```python
+fc.text.trim(column: ColumnOrName) -> Column
+```
+
+---
+
+### ltrim
+
+Remove whitespace from the start of strings in a column.
+
+```python
+fc.text.ltrim(col: ColumnOrName) -> Column
+```
+
+---
+
+### rtrim
+
+Remove whitespace from the end of strings in a column.
+
+```python
+fc.text.rtrim(col: ColumnOrName) -> Column
+```
+
+---
+
+### length
+
+Calculate the character length of each string in the column.
+
+```python
+fc.text.length(column: ColumnOrName) -> Column
+```
+
+---
+
+### byte_length
+
+Calculate the byte length of each string in the column.
+
+```python
+fc.text.byte_length(column: ColumnOrName) -> Column
+```
+
+---
+
+## Template Rendering
+
+### jinja
+
+Render a Jinja template using values from the specified columns.
+
+```python
+fc.text.jinja(
+    jinja_template: str,
+    /,
+    strict: bool = True,
+    **columns: Column
+) -> Column
+```
+
+<ParamField path="jinja_template" type="str" required>
+  A Jinja2 template string to render for each row. Variables are referenced using double braces: `{{ variable_name }}`.
+</ParamField>
+
+<ParamField path="strict" type="bool" default="True">
+  If True, when any of the provided columns has a None value for a row, the entire row's output will be None.
+</ParamField>
+
+<ParamField path="**columns" type="Column" required>
+  Keyword arguments mapping variable names to columns.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A string column containing the rendered template for each row.
+</ResponseField>
+
+### Example
+
+```python LLM prompt formatting
+prompt_template = '''
+Answer the user's question.
+
+{% if context %}
+Context: {{ context }}
+{% endif %}
+
+Question: {{ query }}
+
+Please provide a {{ style }} response.'''
+
+result = df.select(
+    fc.text.jinja(
+        prompt_template,
+        query=fc.col("user_question"),
+        context=fc.col("retrieved_context"),
+        style=fc.when(fc.col("query_type") == "technical", "detailed")
+              .otherwise("concise")
+    ).alias("llm_prompt")
+)
+```
+
+---
+
+## Fuzzy Matching
+
+### compute_fuzzy_ratio
+
+Compute the similarity between two strings using a fuzzy string matching algorithm.
+
+```python
+fc.text.compute_fuzzy_ratio(
+    column: ColumnOrName,
+    other: Union[Column, str],
+    method: FuzzySimilarityMethod = "indel"
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  A string column or column name.
+</ParamField>
+
+<ParamField path="other" type="Union[Column, str]" required>
+  A second string column or literal string.
+</ParamField>
+
+<ParamField path="method" type="FuzzySimilarityMethod" default="indel">
+  Similarity method: `"indel"`, `"levenshtein"`, `"damerau_levenshtein"`, `"jaro"`, `"jaro_winkler"`, or `"hamming"`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A double column with similarity scores in the range [0, 100].
+</ResponseField>
+
+### Example
+
+```python
+result = df.select(
+    fc.text.compute_fuzzy_ratio(fc.col("a"), fc.col("b"), method="levenshtein").alias("sim")
+)
+```
+
+---
+
+### compute_fuzzy_token_sort_ratio
+
+Compute fuzzy similarity after sorting tokens in each string.
+
+```python
+fc.text.compute_fuzzy_token_sort_ratio(
+    column: ColumnOrName,
+    other: Union[Column, str],
+    method: FuzzySimilarityMethod = "indel"
+) -> Column
+```
+
+---
+
+## Transcript Parsing
+
+### parse_transcript
+
+Parses a transcript from text to a structured format with unified schema.
+
+```python
+fc.text.parse_transcript(
+    column: ColumnOrName,
+    format: TranscriptFormatType
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  The input string column or column name containing transcript text.
+</ParamField>
+
+<ParamField path="format" type="TranscriptFormatType" required>
+  The format of the transcript: `"srt"`, `"webvtt"`, or `"generic"`.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column containing an array of structured transcript entries with fields: index, speaker, start_time, end_time, duration, content, format.
+</ResponseField>
+
+### Example
+
+```python
+df.select(fc.text.parse_transcript(fc.col("transcript"), "srt"))
+```

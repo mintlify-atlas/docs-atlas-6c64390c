@@ -1,0 +1,191 @@
+---
+title: DataFrameWriter
+description: Write DataFrames to external storage systems and tables
+---
+
+The `DataFrameWriter` interface provides methods to save DataFrames to external storage systems, including local files, S3, and catalog tables.
+
+## Access
+
+Access the writer through a DataFrame's `write` property:
+
+```python
+df = session.create_dataframe({"id": [1, 2, 3]})
+df.write.csv("output.csv")
+```
+
+## Supported Storage Schemes
+
+### Amazon S3
+
+Format: `s3://{bucket_name}/{path_to_file}`
+
+- Uses boto3 to acquire AWS credentials
+
+```python
+df.write.csv("s3://my-bucket/data.csv")
+df.write.parquet("s3://my-bucket/data.parquet")
+```
+
+### Local Files
+
+Format: `file://{absolute_or_relative_path}` or implicit
+
+- Paths without a scheme are treated as local files
+
+```python
+df.write.csv("./output.csv")
+df.write.parquet("file:///home/user/data.parquet")
+```
+
+## Methods
+
+### save_as_table()
+
+Saves the content of the DataFrame as a table in the catalog.
+
+<ParamField path="table_name" type="str" required>
+  Name of the table to save to.
+</ParamField>
+
+<ParamField path="mode" type="'error' | 'append' | 'overwrite' | 'ignore'" default="'error'">
+  Write mode:
+  - `error`: Raises an error if table exists
+  - `append`: Appends data to table if it exists
+  - `overwrite`: Overwrites existing table
+  - `ignore`: Silently ignores operation if table exists
+</ParamField>
+
+**Returns:** `QueryMetrics` - The query execution metrics
+
+#### Examples
+
+<CodeGroup>
+```python Error mode (default)
+# Raises error if table exists
+metrics = df.write.save_as_table("my_table")
+```
+
+```python Append mode
+# Adds to existing table
+metrics = df.write.save_as_table("my_table", mode="append")
+```
+
+```python Overwrite mode
+# Replaces existing table
+metrics = df.write.save_as_table("my_table", mode="overwrite")
+```
+</CodeGroup>
+
+---
+
+### save_as_view()
+
+Saves the content of the DataFrame as a view in the catalog.
+
+<ParamField path="view_name" type="str" required>
+  Name of the view to save to.
+</ParamField>
+
+<ParamField path="description" type="str" default="None">
+  Optional human-readable view description to store in the catalog.
+</ParamField>
+
+**Returns:** `None`
+
+#### Example
+
+```python
+df.write.save_as_view("my_view", description="Customer summary view")
+```
+
+---
+
+### csv()
+
+Saves the content of the DataFrame as a single CSV file with comma as the delimiter and headers in the first row.
+
+<ParamField path="file_path" type="str | Path" required>
+  Path to save the CSV file to. Must have a `.csv` extension.
+</ParamField>
+
+<ParamField path="mode" type="'error' | 'overwrite' | 'ignore'" default="'overwrite'">
+  Write mode:
+  - `error`: Raises an error if file exists
+  - `overwrite`: Overwrites the file if it exists
+  - `ignore`: Silently ignores operation if file exists
+</ParamField>
+
+**Returns:** `QueryMetrics` - The query execution metrics
+
+#### Examples
+
+<CodeGroup>
+```python Overwrite mode (default)
+# Overwrites if exists
+metrics = df.write.csv("output.csv")
+```
+
+```python Error mode
+# Raises error if exists
+metrics = df.write.csv("output.csv", mode="error")
+```
+
+```python Ignore mode
+# Skips if exists
+metrics = df.write.csv("output.csv", mode="ignore")
+```
+</CodeGroup>
+
+---
+
+### parquet()
+
+Saves the content of the DataFrame as a single Parquet file.
+
+<ParamField path="file_path" type="str | Path" required>
+  Path to save the Parquet file to. Must have a `.parquet` extension.
+</ParamField>
+
+<ParamField path="mode" type="'error' | 'overwrite' | 'ignore'" default="'overwrite'">
+  Write mode:
+  - `error`: Raises an error if file exists
+  - `overwrite`: Overwrites the file if it exists
+  - `ignore`: Silently ignores operation if file exists
+</ParamField>
+
+**Returns:** `QueryMetrics` - The query execution metrics
+
+#### Examples
+
+<CodeGroup>
+```python Overwrite mode (default)
+# Overwrites if exists
+metrics = df.write.parquet("output.parquet")
+```
+
+```python Error mode
+# Raises error if exists
+metrics = df.write.parquet("output.parquet", mode="error")
+```
+
+```python Ignore mode
+# Skips if exists
+metrics = df.write.parquet("output.parquet", mode="ignore")
+```
+</CodeGroup>
+
+## Working with Query Metrics
+
+All write methods (except `save_as_view`) return a `QueryMetrics` object that provides information about the execution:
+
+```python
+metrics = df.write.csv("output.csv")
+print(metrics.get_summary())
+```
+
+## See Also
+
+- [DataFrameReader](/api/dataframe-reader) - Read data from files
+- [Catalog](/api/catalog) - Manage tables and views
+- [DataFrame](/api/dataframe) - DataFrame operations

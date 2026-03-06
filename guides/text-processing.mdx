@@ -1,0 +1,619 @@
+---
+title: 'Text Processing'
+description: 'Master text chunking, parsing, and transformation functions in Fenic'
+---
+
+Fenic provides powerful text processing capabilities for working with unstructured data. These functions are essential for preparing text for semantic operations, parsing structured formats, and extracting information.
+
+## Text Chunking
+
+Chunk large documents into manageable pieces while preserving context.
+
+### Recursive Chunking
+
+Recursive chunking attempts to preserve document structure by splitting on natural boundaries.
+
+<Steps>
+  <Step title="Choose chunk size metric">
+    Select from characters, words, or tokens based on your use case.
+  </Step>
+  <Step title="Set overlap percentage">
+    Add overlap to maintain context across chunk boundaries.
+  </Step>
+  <Step title="Customize split characters">
+    Optionally provide custom split characters ordered from coarse to fine.
+  </Step>
+</Steps>
+
+#### Word-Based Chunking
+
+```python
+import fenic as fc
+
+# Chunk by words with 20% overlap
+chunks_df = df.select(
+    fc.col("source"),
+    fc.text.recursive_word_chunk(
+        fc.col("content"),
+        chunk_size=500,              # 500 words per chunk
+        chunk_overlap_percentage=10   # 10% overlap
+    ).alias("chunks")
+)
+
+# Explode to individual chunks
+chunks_df.explode("chunks").show()
+```
+
+#### Character-Based Chunking
+
+```python
+# Chunk by characters
+chunks_df = df.select(
+    fc.text.recursive_character_chunk(
+        fc.col("text"),
+        chunk_size=1000,             # 1000 characters
+        chunk_overlap_percentage=20  # 20% overlap
+    ).alias("chunks")
+)
+```
+
+#### Token-Based Chunking
+
+```python
+# Chunk by tokens (useful for LLM context windows)
+chunks_df = df.select(
+    fc.text.recursive_token_chunk(
+        fc.col("text"),
+        chunk_size=512,              # 512 tokens
+        chunk_overlap_percentage=10
+    ).alias("chunks")
+)
+```
+
+#### Custom Split Characters
+
+```python
+# Custom character set for specialized content
+chunks_df = df.select(
+    fc.text.recursive_word_chunk(
+        fc.col("text"),
+        chunk_size=100,
+        chunk_overlap_percentage=20,
+        chunking_character_set_custom_characters=['\n\n', '\n', '.', ' ', '']
+    ).alias("chunks")
+)
+```
+
+### Simple Sliding Window
+
+For uniform chunking without structure preservation:
+
+```python
+# Simple character chunks
+df.select(
+    fc.text.character_chunk(
+        fc.col("text"),
+        chunk_size=500,
+        chunk_overlap_percentage=10
+    ).alias("chunks")
+)
+
+# Simple word chunks
+df.select(
+    fc.text.word_chunk(
+        fc.col("text"),
+        chunk_size=100,
+        chunk_overlap_percentage=0
+    ).alias("chunks")
+)
+
+# Simple token chunks
+df.select(
+    fc.text.token_chunk(
+        fc.col("text"),
+        chunk_size=256,
+        chunk_overlap_percentage=15
+    ).alias("chunks")
+)
+```
+
+### Complete Chunking Pipeline
+
+```python
+# Full retrieval pipeline from README
+exploded = (
+    session.read.pdf_metadata("docs/**/*.pdf")
+    .select(
+        fc.col("file_path").alias("source"),
+        fc.semantic.parse_pdf(fc.col("file_path")).alias("content")
+    )
+    .select(
+        fc.col("source"),
+        fc.text.recursive_word_chunk(
+            fc.col("content").cast(fc.StringType),
+            chunk_size=500,
+            chunk_overlap_percentage=10
+        ).alias("chunks")
+    )
+    .explode("chunks")
+)
+
+# Add unique IDs and embeddings
+chunks = (
+    session.sql("SELECT ROW_NUMBER() OVER () as chunk_id, * FROM {df}", df=exploded)
+    .select(
+        "chunk_id",
+        "source",
+        fc.col("chunks").alias("text"),
+        fc.semantic.embed(fc.col("chunks")).alias("embedding")
+    )
+)
+
+chunks.write.save_as_table("chunks", mode="overwrite")
+```
+
+---
+
+## Token Counting
+
+Count tokens using OpenAI's cl100k_base encoding (tiktoken).
+
+```python
+# Count tokens in text
+df.select(
+    "text",
+    fc.text.count_tokens(fc.col("text")).alias("token_count")
+)
+
+# Filter by token count
+df.filter(fc.text.count_tokens(fc.col("text")) < 8000)
+
+# Calculate costs
+df.select(
+    "id",
+    (fc.text.count_tokens(fc.col("text")) * 0.0001).alias("est_cost")
+)
+```
+
+---
+
+## Markdown Processing
+
+Parse and extract structured information from markdown documents.
+
+### Generate Table of Contents
+
+```python
+# Generate TOC from markdown
+toc_df = df.select(
+    fc.col("title"),
+    fc.markdown.generate_toc(
+        fc.col("content").cast(fc.MarkdownType)
+    ).alias("toc")
+)
+
+# Limit TOC depth
+toc_df = df.select(
+    fc.markdown.generate_toc(
+        fc.col("content").cast(fc.MarkdownType),
+        max_level=2  # Only h1 and h2
+    ).alias("toc")
+)
+```
+
+### Extract Header-Based Chunks
+
+Split documents by heading level while preserving structure.
+
+```python
+# Extract all level-2 sections
+sections_df = df.select(
+    fc.col("title"),
+    fc.markdown.extract_header_chunks(
+        fc.col("content").cast(fc.MarkdownType),
+        header_level=2
+    ).alias("sections")
+).explode("sections").unnest("sections")
+
+# Result has columns:
+# - heading: Section heading text
+# - level: Heading level (1-6)
+# - content: All content under this heading
+# - parent_heading: Parent heading or null
+# - full_path: Breadcrumb path
+
+print("Sections structure:")
+sections_df.select(
+    "heading",
+    "level",
+    "parent_heading",
+    "full_path"
+).show()
+```
+
+### Extract Code Blocks
+
+```python
+# Get all code blocks
+code_blocks_df = df.select(
+    fc.markdown.get_code_blocks(
+        fc.col("content").cast(fc.MarkdownType)
+    ).alias("blocks")
+).explode("blocks").unnest("blocks")
+
+# Result has: language, code
+code_blocks_df.select("language", "code").show()
+
+# Filter by language
+python_code = df.select(
+    fc.markdown.get_code_blocks(
+        fc.col("content").cast(fc.MarkdownType),
+        language_filter="python"
+    ).alias("blocks")
+)
+```
+
+### Convert to JSON
+
+```python
+# Convert markdown to hierarchical JSON
+json_df = df.select(
+    fc.markdown.to_json(
+        fc.col("content").cast(fc.MarkdownType)
+    ).alias("doc_json")
+)
+
+# Query with jq
+headings_df = json_df.select(
+    fc.json.jq(
+        fc.col("doc_json"),
+        '.. | select(.type == "heading" and .level == 2)'
+    ).alias("h2_headings")
+)
+```
+
+### Full Markdown Example
+
+From `examples/markdown_processing/markdown_processing.py`:
+
+```python
+import fenic as fc
+from pathlib import Path
+
+session = fc.Session.get_or_create(fc.SessionConfig(app_name="markdown_demo"))
+
+# Load markdown file
+paper_path = Path("attention_is_all_you_need.md")
+with open(paper_path, 'r') as f:
+    content = f.read()
+
+df = session.create_dataframe({
+    "title": ["Attention Is All You Need"],
+    "content": [content]
+})
+
+# Cast to MarkdownType
+df = df.select(
+    fc.col("title"),
+    fc.col("content").cast(fc.MarkdownType).alias("markdown")
+)
+
+# Extract sections
+sections_df = df.select(
+    fc.col("title"),
+    fc.markdown.extract_header_chunks(
+        fc.col("markdown"),
+        header_level=2
+    ).alias("sections")
+).explode("sections").unnest("sections")
+
+# Find references section
+refs_df = sections_df.filter(
+    fc.col("heading").contains("References")
+)
+```
+
+---
+
+## JSON Processing
+
+Query and validate JSON data using jq.
+
+### JQ Queries
+
+```python
+# Extract nested field
+df.select(
+    fc.json.jq(
+        fc.col("data").cast(fc.JsonType),
+        ".user.name"
+    ).alias("username")
+)
+
+# Map over arrays
+df.select(
+    fc.json.jq(
+        fc.col("data").cast(fc.JsonType),
+        "map(.id)"
+    ).alias("ids")
+)
+
+# Complex query
+df.select(
+    fc.json.jq(
+        fc.col("doc").cast(fc.JsonType),
+        '.children[] | select(.type == "heading" and .level == 2) | .content[0].text'
+    ).alias("h2_text")
+)
+```
+
+### Type Checking
+
+```python
+# Get JSON type
+df.select(
+    "data",
+    fc.json.get_type(fc.col("data").cast(fc.JsonType)).alias("json_type")
+)
+
+# Filter by type
+df.filter(
+    fc.json.get_type(fc.col("data").cast(fc.JsonType)) == "array"
+)
+```
+
+### Search JSON
+
+```python
+# Recursive deep search
+df.filter(
+    fc.json.contains(
+        fc.col("data").cast(fc.JsonType),
+        '{"role": "admin"}'  # Partial object match
+    )
+)
+
+# Find arrays
+df.filter(
+    fc.json.contains(
+        fc.col("data").cast(fc.JsonType),
+        '["read", "write"]'  # Exact array match
+    )
+)
+```
+
+---
+
+## Template Extraction
+
+Extract structured data using template patterns.
+
+```python
+# Parse log format
+df.select(
+    fc.text.extract(
+        fc.col("log"),
+        "${date} ${level} ${message}"
+    ).alias("parsed")
+).select(
+    fc.col("parsed").get_item("date").alias("date"),
+    fc.col("parsed").get_item("level").alias("level"),
+    fc.col("parsed").get_item("message").alias("message")
+)
+
+# Parse CSV fields
+df.select(
+    fc.text.extract(
+        fc.col("data"),
+        'Name: ${name:csv}, Price: ${price}, Tags: ${tags:json}'
+    ).alias("fields")
+)
+# Input: 'Name: "Smith, John", Price: 99.99, Tags: ["a", "b"]'
+# Output: {name: "Smith, John", price: "99.99", tags: ["a", "b"]}
+
+# Parse quoted strings
+df.select(
+    fc.text.extract(
+        fc.col("record"),
+        'Title: ${title:quoted}, Author: ${author}'
+    ).alias("book")
+)
+```
+
+---
+
+## Transcript Parsing
+
+Parse transcript formats into structured data.
+
+```python
+# Parse SRT format
+df.select(
+    fc.text.parse_transcript(
+        fc.col("transcript"),
+        format="srt"
+    ).alias("entries")
+).explode("entries").unnest("entries")
+
+# Parse generic format
+df.select(
+    fc.text.parse_transcript(
+        fc.col("conversation"),
+        format="generic"
+    ).alias("turns")
+)
+
+# Result schema:
+# - index: int (1-based)
+# - speaker: str (for generic format)
+# - start_time: float (seconds)
+# - end_time: float (seconds)
+# - duration: float (seconds)
+# - content: str (text)
+# - format: str ("srt", "webvtt", or "generic")
+```
+
+---
+
+## String Operations
+
+### Basic Transformations
+
+```python
+# Case conversion
+fc.text.upper(fc.col("text"))
+fc.text.lower(fc.col("text"))
+fc.text.title_case(fc.col("text"))
+
+# Trimming
+fc.text.trim(fc.col("text"))        # Both sides
+fc.text.ltrim(fc.col("text"))       # Left
+fc.text.rtrim(fc.col("text"))       # Right
+fc.text.btrim(fc.col("text"), "[]") # Custom chars
+
+# Length
+fc.text.length(fc.col("text"))      # Character count
+fc.text.byte_length(fc.col("text")) # Byte count
+```
+
+### Concatenation
+
+```python
+# Simple concat
+fc.text.concat(
+    fc.col("first_name"),
+    fc.lit(" "),
+    fc.col("last_name")
+)
+
+# With separator
+fc.text.concat_ws(",", fc.col("col1"), fc.col("col2"))
+
+# Join array
+fc.text.array_join(fc.col("tags"), ", ")
+```
+
+### Pattern Matching
+
+```python
+# Replace
+fc.text.replace(fc.col("text"), "old", "new")
+fc.text.regexp_replace(fc.col("text"), r"\d+", "[NUM]")
+
+# Extract
+fc.text.regexp_extract(fc.col("email"), r"([^@]+)@", 1)
+fc.text.regexp_extract_all(fc.col("text"), r"#(\w+)", 1)
+
+# Count matches
+fc.text.regexp_count(fc.col("text"), r"\d")
+
+# Find position
+fc.text.regexp_instr(fc.col("text"), r"\d")
+
+# Get substring
+fc.text.regexp_substr(fc.col("text"), r"\d+\.\d+")
+```
+
+### Splitting
+
+```python
+# Split on pattern
+fc.text.split(fc.col("text"), r"\s+")
+fc.text.split(fc.col("text"), r"\s+", limit=2)
+
+# Get specific part
+fc.text.split_part(fc.col("text"), ",", 2)    # Second part
+fc.text.split_part(fc.col("text"), ",", -1)   # Last part
+```
+
+### Fuzzy Matching
+
+```python
+# Compute similarity
+fc.text.compute_fuzzy_ratio(
+    fc.col("text1"),
+    fc.col("text2"),
+    method="levenshtein"  # or "jaro", "jaro_winkler", "hamming", "damerau_levenshtein", "indel"
+)
+
+# Token-based similarity
+fc.text.compute_fuzzy_token_sort_ratio(
+    fc.col("text1"),
+    "reference text",
+    method="levenshtein"
+)
+```
+
+---
+
+## Jinja Templates
+
+Render Jinja2 templates with column data.
+
+```python
+# Basic template
+df.select(
+    fc.text.jinja(
+        "Hello {{ name }}, you have {{ count }} messages.",
+        name=fc.col("user_name"),
+        count=fc.col("message_count")
+    ).alias("greeting")
+)
+
+# With conditionals
+prompt_template = '''
+Answer the user's question.
+
+{% if context %}
+Context: {{ context }}
+{% endif %}
+
+{% if examples %}
+Examples:
+{% for ex in examples %}
+Q: {{ ex.question }}
+A: {{ ex.answer }}
+{% endfor %}
+{% endif %}
+
+Question: {{ query }}
+'''
+
+df.select(
+    fc.text.jinja(
+        prompt_template,
+        query=fc.col("user_question"),
+        context=fc.col("retrieved_context"),
+        examples=fc.col("few_shot_examples")
+    ).alias("prompt")
+)
+```
+
+---
+
+## Best Practices
+
+<Tip>
+**Choose the Right Chunk Size**: For LLM context, use token-based chunking. For display, use word or character chunking.
+</Tip>
+
+<Warning>
+**Preserve Context**: Use recursive chunking with overlap for better semantic coherence across chunks.
+</Warning>
+
+<Note>
+**Cast to MarkdownType**: Always cast to `MarkdownType` before using markdown functions for proper type inference.
+</Note>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Semantic Operators" icon="brain" href="/guides/working-with-semantic-operators">
+    Apply LLM-powered transformations to processed text
+  </Card>
+  <Card title="Memory and Retrieval" icon="database" href="/guides/memory-and-retrieval">
+    Build retrieval systems with chunked documents
+  </Card>
+</CardGroup>

@@ -1,0 +1,610 @@
+---
+title: 'Semantic Operators'
+description: 'Transform data using LLM-powered semantic operations like extract, map, classify, and reduce'
+---
+
+## Overview
+
+**Semantic operators** are LLM-powered functions that transform unstructured data into structured insights. They enable natural language processing tasks like extraction, classification, summarization, and semantic search at scale.
+
+All semantic operators are available through the `semantic` namespace:
+
+```python
+from fenic.api.functions import semantic
+```
+
+## Core Operators
+
+### extract()
+
+Extract structured information from unstructured text using a Pydantic schema.
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing text to extract from
+</ParamField>
+
+<ParamField path="response_format" type="type[BaseModel]" required>
+  Pydantic model defining the output structure
+</ParamField>
+
+<ParamField path="model_alias" type="str | ModelAlias" default="None">
+  Language model to use (defaults to configured default)
+</ParamField>
+
+<ParamField path="temperature" type="float" default="0.0">
+  Sampling temperature (0.0 = deterministic)
+</ParamField>
+
+<ParamField path="max_output_tokens" type="int" default="1024">
+  Maximum tokens to generate
+</ParamField>
+
+<CodeGroup>
+```python Basic Extraction
+from pydantic import BaseModel, Field
+from fenic.api.functions import semantic, col
+
+class Person(BaseModel):
+    name: str = Field(description="Person's full name")
+    age: int = Field(description="Person's age in years")
+    occupation: str = Field(description="Person's job or profession")
+
+df = df.with_column(
+    "structured_data",
+    semantic.extract("biography", response_format=Person)
+)
+```
+
+```python Nested Extraction
+from pydantic import BaseModel, Field
+from typing import List
+
+class Triple(BaseModel):
+    subject: str = Field(description="Subject of the triple")
+    predicate: str = Field(description="Relation or predicate")
+    object: str = Field(description="Object of the triple")
+
+class KnowledgeGraph(BaseModel):
+    triples: List[Triple] = Field(description="Knowledge graph triples")
+    entities: List[str] = Field(description="All detected entities")
+
+df = df.with_column(
+    "knowledge_graph",
+    semantic.extract("document", response_format=KnowledgeGraph)
+)
+```
+</CodeGroup>
+
+<Info>
+  The `response_format` schema supports: primitives (`str`, `int`, `float`, `bool`), `Optional[T]`, `List[T]`, `Literal[...]`, and nested Pydantic models.
+</Info>
+
+### map()
+
+Apply a generation prompt to transform data using Jinja2 templates.
+
+<ParamField path="prompt" type="str" required>
+  Jinja2 template with column placeholders like `{{ column_name }}`
+</ParamField>
+
+<ParamField path="**columns" type="Column" required>
+  Named columns corresponding to template variables
+</ParamField>
+
+<ParamField path="strict" type="bool" default="True">
+  If True, None values in any column result in None output
+</ParamField>
+
+<ParamField path="examples" type="MapExampleCollection" default="None">
+  Few-shot examples to guide output format
+</ParamField>
+
+<ParamField path="response_format" type="type[BaseModel]" default="None">
+  Optional Pydantic model for structured output
+</ParamField>
+
+<CodeGroup>
+```python Simple Mapping
+from fenic.api.functions import semantic, col
+
+df = df.with_column(
+    "product_description",
+    semantic.map(
+        "Write a compelling one-line description for {{ name }}: {{ details }}",
+        name=col("product_name"),
+        details=col("product_features")
+    )
+)
+```
+
+```python With Examples
+from fenic.core.types import MapExample, MapExampleCollection
+
+examples = MapExampleCollection()
+examples.create_example(MapExample(
+    input={
+        "name": "GlowMate",
+        "details": "Rechargeable lamp with adjustable colors"
+    },
+    output="The modern lamp for better sleep and style."
+))
+examples.create_example(MapExample(
+    input={
+        "name": "AquaPure",
+        "details": "Faucet filter removing 99% contaminants"
+    },
+    output="Clean, great-tasting water straight from your tap."
+))
+
+df = df.with_column(
+    "description",
+    semantic.map(
+        "Write a compelling one-line description for {{ name }}: {{ details }}",
+        name=col("name"),
+        details=col("details"),
+        examples=examples
+    )
+)
+```
+
+```python Structured Output
+from pydantic import BaseModel, Field
+
+class Analysis(BaseModel):
+    sentiment: str = Field(description="positive, negative, or neutral")
+    key_themes: List[str] = Field(description="Main themes")
+    action_items: List[str] = Field(description="Action items")
+
+df = df.with_column(
+    "analysis",
+    semantic.map(
+        "Analyze this feedback: {{ text }}",
+        text=col("feedback"),
+        response_format=Analysis
+    )
+)
+```
+</CodeGroup>
+
+### classify()
+
+Classify text into predefined categories.
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing text to classify
+</ParamField>
+
+<ParamField path="classes" type="List[str] | List[ClassDefinition]" required>
+  List of class labels or ClassDefinition objects with descriptions
+</ParamField>
+
+<ParamField path="examples" type="ClassifyExampleCollection" default="None">
+  Few-shot examples for classification
+</ParamField>
+
+<CodeGroup>
+```python Simple Classification
+from fenic.api.functions import semantic
+
+df = df.with_column(
+    "category",
+    semantic.classify(
+        "message",
+        classes=["Account Access", "Billing Issue", "Technical Problem"]
+    )
+)
+```
+
+```python With Descriptions
+from fenic.core.types import ClassDefinition
+
+classes = [
+    ClassDefinition(
+        label="Account Access",
+        description="Questions about login, password reset, or account access"
+    ),
+    ClassDefinition(
+        label="Billing Issue",
+        description="Questions about charges, payments, or subscriptions"
+    ),
+    ClassDefinition(
+        label="Technical Problem",
+        description="Problems with product functionality or bugs"
+    )
+]
+
+df = df.with_column(
+    "category",
+    semantic.classify("message", classes=classes)
+)
+```
+
+```python With Examples
+from fenic.core.types import ClassifyExample, ClassifyExampleCollection
+
+examples = ClassifyExampleCollection()
+examples.create_example(ClassifyExample(
+    input="I can't log into my account",
+    output="Account Access"
+))
+examples.create_example(ClassifyExample(
+    input="You charged me twice this month",
+    output="Billing Issue"
+))
+
+df = df.with_column(
+    "category",
+    semantic.classify(
+        "message",
+        classes=["Account Access", "Billing Issue", "Technical Problem"],
+        examples=examples
+    )
+)
+```
+</CodeGroup>
+
+### predicate()
+
+Evaluate boolean conditions for filtering.
+
+<ParamField path="predicate" type="str" required>
+  Jinja2 template with yes/no question or boolean claim
+</ParamField>
+
+<ParamField path="**columns" type="Column" required>
+  Named columns corresponding to template variables
+</ParamField>
+
+<ParamField path="strict" type="bool" default="True">
+  If True, None values result in None output
+</ParamField>
+
+<ParamField path="examples" type="PredicateExampleCollection" default="None">
+  Few-shot examples for consistent evaluation
+</ParamField>
+
+```python
+from fenic.api.functions import semantic, col
+from textwrap import dedent
+
+# Filter products
+wireless = df.filter(
+    semantic.predicate(
+        dedent('''
+            Product: {{ description }}
+            Is this product wireless or battery-powered?'''),
+        description=col("product_description")
+    )
+)
+
+# Filter urgent tickets
+urgent = df.filter(
+    semantic.predicate(
+        dedent('''
+            Subject: {{ subject }}
+            Body: {{ body }}
+            This ticket indicates an urgent issue.'''),
+        subject=col("ticket_subject"),
+        body=col("ticket_body")
+    )
+)
+```
+
+### reduce()
+
+Aggregate multiple text values into a single summary (used with `group_by`).
+
+<ParamField path="prompt" type="str" required>
+  Instruction for aggregation (supports Jinja2 templates)
+</ParamField>
+
+<ParamField path="column" type="ColumnOrName" required>
+  Column containing text to aggregate
+</ParamField>
+
+<ParamField path="group_context" type="Dict[str, Column]" default="None">
+  Additional columns for context (from first row of group)
+</ParamField>
+
+<ParamField path="order_by" type="List[ColumnOrName]" default="None">
+  Columns to sort by before aggregation
+</ParamField>
+
+<CodeGroup>
+```python Simple Reduce
+from fenic.api.functions import semantic, col
+
+# Summarize documents by category
+df.group_by("category").agg(
+    semantic.reduce(
+        "Summarize these documents",
+        col("document_text")
+    ).alias("summary")
+)
+```
+
+```python With Context
+# Summarize with group context
+df.group_by("department", "region").agg(
+    semantic.reduce(
+        "Summarize these {{ department }} reports from {{ region }}",
+        col("document_text"),
+        group_context={
+            "department": col("department"),
+            "region": col("region")
+        }
+    ).alias("summary")
+)
+```
+
+```python With Ordering
+# Preserve temporal order
+df.group_by("conversation_id").agg(
+    semantic.reduce(
+        "Summarize this conversation",
+        col("message_text"),
+        order_by=[col("timestamp")]
+    ).alias("summary")
+)
+```
+</CodeGroup>
+
+## Specialized Operators
+
+### embed()
+
+Generate vector embeddings for semantic search.
+
+```python
+from fenic.api.functions import semantic
+
+df = df.with_column(
+    "embeddings",
+    semantic.embed(col("text_column"))
+)
+```
+
+### summarize()
+
+Generate summaries in specific formats.
+
+```python
+from fenic.api.functions import semantic
+from fenic.core.types import KeyPoints, Paragraph
+
+# Key points format
+df = df.with_column(
+    "summary",
+    semantic.summarize(col("article"), format=KeyPoints(num_points=5))
+)
+
+# Paragraph format
+df = df.with_column(
+    "summary",
+    semantic.summarize(col("article"), format=Paragraph(max_words=120))
+)
+```
+
+### analyze_sentiment()
+
+Analyze sentiment (returns "positive", "negative", or "neutral").
+
+```python
+from fenic.api.functions import semantic
+
+df = df.with_column(
+    "sentiment",
+    semantic.analyze_sentiment(col("review_text"))
+)
+```
+
+### parse_pdf()
+
+Parse PDF files into markdown.
+
+```python
+from fenic.api.functions import semantic
+
+# Parse PDFs
+pdf_metadata = session.read.pdf_metadata("docs/**/*.pdf")
+df = pdf_metadata.with_column(
+    "markdown_content",
+    semantic.parse_pdf(
+        col("file_path"),
+        page_separator="--- PAGE {page} ---",
+        describe_images=True
+    )
+)
+```
+
+## DataFrame Semantic Operations
+
+### semantic.join()
+
+Join DataFrames using natural language predicates.
+
+```python
+from textwrap import dedent
+from fenic.api.functions import col
+
+jobs = session.read.csv("jobs.csv")
+resumes = session.read.csv("resumes.csv")
+
+matches = jobs.semantic.join(
+    resumes,
+    predicate=dedent('''
+        Job: {{ left_on }}
+        Experience: {{ right_on }}
+        The candidate is qualified for this job.'''),
+    left_on=col("job_description"),
+    right_on=col("work_experience")
+)
+```
+
+### semantic.sim_join()
+
+Join based on embedding similarity.
+
+```python
+from fenic.api.functions import semantic, col
+
+queries = session.read.csv("queries.csv")
+docs = session.read.csv("documents.csv")
+
+matches = queries.semantic.sim_join(
+    docs,
+    left_on=semantic.embed(col("query_text")),
+    right_on=semantic.embed(col("doc_text")),
+    k=3,  # Top 3 matches per query
+    similarity_metric="cosine",
+    similarity_score_column="similarity"
+)
+```
+
+### semantic.with_cluster_labels()
+
+Cluster rows using K-means on embeddings.
+
+```python
+clustered = df.semantic.with_cluster_labels(
+    by=semantic.embed(col("text")),
+    num_clusters=5,
+    label_column="cluster_id",
+    centroid_column="cluster_centroid"
+)
+```
+
+## Model Selection
+
+### Using Default Model
+
+```python
+# Uses default model from session config
+semantic.map(
+    "Summarize: {{ text }}",
+    text=col("content")
+)
+```
+
+### Specifying Model Alias
+
+```python
+# Use specific model
+semantic.map(
+    "Summarize: {{ text }}",
+    text=col("content"),
+    model_alias="gpt4"  # Must be configured in session
+)
+```
+
+### Using Model Profiles
+
+```python
+from fenic.core.types.semantic import ModelAlias
+
+# Use specific profile
+semantic.map(
+    "Construct a formal proof of {{ hypothesis }}",
+    hypothesis=col("claim"),
+    model_alias=ModelAlias(name="o4", profile="thorough")
+)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use structured outputs when possible" icon="table">
+    Pydantic schemas provide type safety and validation:
+    
+    ```python
+    # Good: Structured output
+    semantic.extract("text", response_format=MySchema)
+    
+    # Less reliable: Free-form text
+    semantic.map("Extract information from {{ text }}", text=col("text"))
+    ```
+  </Accordion>
+  
+  <Accordion title="Provide clear field descriptions" icon="comment">
+    LLMs use field descriptions to understand output requirements:
+    
+    ```python
+    class Person(BaseModel):
+        name: str = Field(description="Person's full legal name")
+        age: int = Field(description="Age in complete years")
+        # Not: name: str  (no description)
+    ```
+  </Accordion>
+  
+  <Accordion title="Use examples for consistency" icon="list">
+    Few-shot examples dramatically improve output quality:
+    
+    ```python
+    examples = MapExampleCollection()
+    examples.create_example(MapExample(
+        input={"text": "..."},
+        output="Expected format"
+    ))
+    ```
+  </Accordion>
+  
+  <Accordion title="Set appropriate temperatures" icon="temperature-half">
+    - Use `temperature=0.0` for deterministic, factual tasks
+    - Use `temperature=0.7+` for creative generation
+    
+    ```python
+    # Factual extraction
+    semantic.extract("text", response_format=Schema, temperature=0.0)
+    
+    # Creative writing
+    semantic.map("Write a story about {{ topic }}", topic=col("topic"), temperature=0.8)
+    ```
+  </Accordion>
+  
+  <Accordion title="Batch operations automatically" icon="layer-group">
+    Fenic automatically batches LLM requests for efficiency. No need to manually batch:
+    
+    ```python
+    # This is efficient - automatic batching
+    df.with_column(
+        "extracted",
+        semantic.extract("text", response_format=Schema)
+    ).collect()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Performance Considerations
+
+1. **Cost**: Semantic operations call LLM APIs and incur costs. Use `limit()` during development.
+2. **Latency**: LLM calls add latency. Consider async execution for large datasets.
+3. **Rate limits**: Configure `rpm` and `tpm` in session config to match provider limits.
+4. **Caching**: Results are not cached by default. Use session-level LLM response caching if available.
+
+## Error Handling
+
+```python
+try:
+    result = df.with_column(
+        "extracted",
+        semantic.extract("text", response_format=Schema)
+    ).collect()
+except ValidationError as e:
+    # Schema validation failed
+    print(f"Schema error: {e}")
+except Exception as e:
+    # LLM API error or other issue
+    print(f"Execution error: {e}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Types" icon="database" href="/concepts/data-types">
+    Learn about Fenic's type system
+  </Card>
+  
+  <Card title="Sessions" icon="gear" href="/concepts/sessions">
+    Configure models and execution
+  </Card>
+</CardGroup>

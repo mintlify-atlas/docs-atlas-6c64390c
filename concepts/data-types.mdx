@@ -1,0 +1,599 @@
+---
+title: 'Data Types'
+description: 'Understand Fenic type system including primitive types, logical types, and specialized types for AI workloads'
+---
+
+## Overview
+
+Fenic provides a rich type system designed for both traditional data processing and AI workloads. Types are used for schema definition, casting, validation, and optimization throughout the DataFrame API.
+
+## Type Categories
+
+Fenic types fall into three main categories:
+
+1. **Primitive Types**: Basic types like strings, integers, and booleans
+2. **Composite Types**: Arrays and structs containing other types
+3. **Logical Types**: Specialized types for AI workloads (embeddings, markdown, JSON, etc.)
+
+## Primitive Types
+
+### StringType
+
+Represents UTF-8 encoded string values.
+
+```python
+from fenic.core.types import StringType
+
+# Used in schema definitions
+StructField("name", StringType)
+
+# Cast to string
+df.with_column("str_value", col("number").cast(StringType))
+```
+
+### IntegerType
+
+Represents signed integer values.
+
+```python
+from fenic.core.types import IntegerType
+
+StructField("age", IntegerType)
+df.with_column("int_value", col("string_number").cast(IntegerType))
+```
+
+### FloatType
+
+Represents 32-bit floating-point numbers.
+
+```python
+from fenic.core.types import FloatType
+
+StructField("score", FloatType)
+df.with_column("float_value", col("decimal_str").cast(FloatType))
+```
+
+### DoubleType
+
+Represents 64-bit floating-point numbers (higher precision than float).
+
+```python
+from fenic.core.types import DoubleType
+
+StructField("precise_value", DoubleType)
+df.with_column("double_value", col("high_precision").cast(DoubleType))
+```
+
+### BooleanType
+
+Represents boolean True/False values.
+
+```python
+from fenic.core.types import BooleanType
+
+StructField("is_active", BooleanType)
+df.with_column("bool_value", col("flag").cast(BooleanType))
+```
+
+### DateType
+
+Represents date values (year, month, day).
+
+```python
+from fenic.core.types import DateType
+
+StructField("birth_date", DateType)
+df.with_column("date_value", col("date_string").cast(DateType))
+```
+
+### TimestampType
+
+Represents timestamp values with date and time.
+
+```python
+from fenic.core.types import TimestampType
+
+StructField("created_at", TimestampType)
+df.with_column("ts_value", col("timestamp_str").cast(TimestampType))
+```
+
+## Composite Types
+
+### ArrayType
+
+Represents a homogeneous variable-length array (list) of elements.
+
+<ParamField path="element_type" type="DataType" required>
+  The data type of each element in the array
+</ParamField>
+
+<CodeGroup>
+```python Array of Strings
+from fenic.core.types import ArrayType, StringType
+
+# Define schema with array
+ArrayType(StringType)
+ArrayType(element_type=StringType)
+
+# Example: tags column
+StructField("tags", ArrayType(StringType))
+```
+
+```python Array of Integers
+from fenic.core.types import ArrayType, IntegerType
+
+# Array of integers
+ArrayType(IntegerType)
+
+# Example: scores column
+StructField("scores", ArrayType(IntegerType))
+```
+
+```python Nested Arrays
+from fenic.core.types import ArrayType, FloatType
+
+# Array of arrays (matrix)
+ArrayType(ArrayType(FloatType))
+
+# Example: matrix column
+StructField("matrix", ArrayType(ArrayType(FloatType)))
+```
+</CodeGroup>
+
+#### Working with Arrays
+
+```python
+from fenic.api.functions import col, array
+
+# Create array column
+df.with_column("tags", array(["tag1", "tag2", "tag3"]))
+
+# Explode array into rows
+df.select("id", col("tags").explode())
+
+# Array length
+df.with_column("tag_count", col("tags").list.len())
+
+# Access array element
+df.with_column("first_tag", col("tags").list.get(0))
+```
+
+### StructType
+
+Represents a struct (record) with named fields.
+
+<ParamField path="struct_fields" type="List[StructField]" required>
+  List of field definitions (name and type pairs)
+</ParamField>
+
+<CodeGroup>
+```python Simple Struct
+from fenic.core.types import StructType, StructField, StringType, IntegerType
+
+address_type = StructType([
+    StructField("street", StringType),
+    StructField("city", StringType),
+    StructField("zip_code", IntegerType)
+])
+
+StructField("address", address_type)
+```
+
+```python Nested Struct
+from fenic.core.types import (
+    StructType, StructField,
+    StringType, IntegerType, ArrayType
+)
+
+person_type = StructType([
+    StructField("name", StringType),
+    StructField("age", IntegerType),
+    StructField("address", StructType([
+        StructField("street", StringType),
+        StructField("city", StringType)
+    ])),
+    StructField("phone_numbers", ArrayType(StringType))
+])
+```
+</CodeGroup>
+
+#### Working with Structs
+
+```python
+from fenic.api.functions import col
+
+# Access struct field
+df.select(col("address").struct.field("city"))
+
+# Unnest struct into separate columns
+df.unnest("address")  # Creates: address_street, address_city, address_zip_code
+
+# Create struct from columns
+from fenic.api.functions import struct
+df.with_column(
+    "location",
+    struct([col("latitude"), col("longitude")])
+)
+```
+
+## Logical Types
+
+Logical types are specialized string types that preserve semantic meaning for AI operations.
+
+### EmbeddingType
+
+Represents a fixed-length embedding vector.
+
+<ParamField path="dimensions" type="int" required>
+  Number of dimensions in the embedding vector
+</ParamField>
+
+<ParamField path="embedding_model" type="str" required>
+  Name of the model used to generate the embedding
+</ParamField>
+
+```python
+from fenic.core.types import EmbeddingType
+
+# OpenAI text-embedding-3-small (1536 dimensions)
+EmbeddingType(1536, embedding_model="text-embedding-3-small")
+
+# Cohere embed-v4 (1024 dimensions)
+EmbeddingType(1024, embedding_model="embed-v4.0")
+```
+
+#### Generating Embeddings
+
+```python
+from fenic.api.functions import semantic
+
+# Generate embeddings
+df = df.with_column(
+    "text_embeddings",
+    semantic.embed(col("text_column"))
+)
+
+# The column will have EmbeddingType(dimensions, model)
+# based on your configured embedding model
+```
+
+### MarkdownType
+
+Represents a string containing Markdown-formatted text.
+
+```python
+from fenic.core.types import MarkdownType
+
+StructField("document", MarkdownType)
+```
+
+#### Use Cases
+
+- Storing formatted documentation
+- Output from PDF parsing
+- Rich text content for LLM processing
+
+```python
+from fenic.api.functions import semantic
+
+# Parse PDF to markdown
+df = df.with_column(
+    "markdown_content",
+    semantic.parse_pdf(col("pdf_path"))
+)
+# Result column has MarkdownType
+```
+
+### HtmlType
+
+Represents a string containing raw HTML markup.
+
+```python
+from fenic.core.types import HtmlType
+
+StructField("webpage_content", HtmlType)
+```
+
+### JsonType
+
+Represents a string containing valid JSON data.
+
+```python
+from fenic.core.types import JsonType
+
+StructField("api_response", JsonType)
+```
+
+#### Working with JSON
+
+```python
+from fenic.api.functions import col
+
+# Parse JSON string to struct
+df.with_column(
+    "parsed",
+    col("json_column").str.json_extract()
+)
+
+# Convert to JSON string
+df.with_column(
+    "json_str",
+    col("struct_column").to_json()
+)
+```
+
+### TranscriptType
+
+Represents a string containing a transcript in a specific format.
+
+<ParamField path="format" type="Literal['generic', 'srt', 'webvtt']" required>
+  The transcript format
+</ParamField>
+
+<Tabs>
+  <Tab title="Generic">
+    ```python
+    from fenic.core.types import TranscriptType
+    
+    # Generic transcript format
+    TranscriptType(format="generic")
+    
+    StructField("transcript", TranscriptType(format="generic"))
+    ```
+  </Tab>
+  
+  <Tab title="SRT">
+    ```python
+    # SubRip (.srt) subtitle format
+    TranscriptType(format="srt")
+    
+    StructField("subtitles", TranscriptType(format="srt"))
+    ```
+  </Tab>
+  
+  <Tab title="WebVTT">
+    ```python
+    # WebVTT (.vtt) subtitle format
+    TranscriptType(format="webvtt")
+    
+    StructField("captions", TranscriptType(format="webvtt"))
+    ```
+  </Tab>
+</Tabs>
+
+### DocumentPathType
+
+Represents a string containing a document's local (file system) or remote (URL) path.
+
+```python
+from fenic.core.types import DocumentPathType
+
+# PDF path type
+DocumentPathType(format="pdf")
+
+StructField("pdf_path", DocumentPathType(format="pdf"))
+```
+
+## Type Inspection
+
+### Getting DataFrame Schema
+
+```python
+# Get schema
+schema = df.schema
+print(schema)
+# Schema([
+#     ColumnField('name', StringType),
+#     ColumnField('age', IntegerType),
+#     ColumnField('tags', ArrayType(StringType))
+# ])
+
+# Print formatted schema
+df.print_schema()
+# root
+#  |-- name: StringType
+#  |-- age: IntegerType
+#  |-- tags: ArrayType(StringType)
+
+# Get column names
+columns = df.columns  # ['name', 'age', 'tags']
+
+# Get specific field type
+name_field = schema.field("name")
+print(name_field.data_type)  # StringType
+```
+
+### Type Checking
+
+```python
+from fenic.core.types import StringType, IntegerType, ArrayType
+
+# Check if types match
+StringType == StringType  # True
+StringType == IntegerType  # False
+
+# Check array element type
+array_type = ArrayType(StringType)
+array_type.element_type == StringType  # True
+
+# Check struct fields
+from fenic.core.types import StructType, StructField
+
+struct_type = StructType([
+    StructField("name", StringType),
+    StructField("age", IntegerType)
+])
+
+struct_type.struct_fields[0].name  # "name"
+struct_type.struct_fields[0].data_type  # StringType
+```
+
+## Type Casting
+
+```python
+from fenic.api.functions import col
+from fenic.core.types import StringType, IntegerType, DoubleType
+
+# Cast to string
+df.with_column("age_str", col("age").cast(StringType))
+
+# Cast to integer
+df.with_column("age_int", col("age_str").cast(IntegerType))
+
+# Cast to double
+df.with_column("score_double", col("score").cast(DoubleType))
+```
+
+## Schema Definition
+
+Define explicit schemas for reading data:
+
+```python
+from fenic.core.types import (
+    Schema,
+    ColumnField,
+    StringType,
+    IntegerType,
+    ArrayType,
+    StructType,
+    StructField
+)
+
+schema = Schema([
+    ColumnField("id", IntegerType),
+    ColumnField("name", StringType),
+    ColumnField("tags", ArrayType(StringType)),
+    ColumnField("metadata", StructType([
+        StructField("created_at", StringType),
+        StructField("version", IntegerType)
+    ]))
+])
+
+df = session.read.csv("data.csv", schema=schema)
+```
+
+## Type Inference
+
+Fenic automatically infers types when reading data:
+
+```python
+# From CSV - infers types from data
+df = session.read.csv("data.csv")
+
+# From Parquet - uses Parquet schema
+df = session.read.parquet("data.parquet")
+
+# From dictionary - infers from Python types
+df = session.create_dataframe({
+    "name": ["Alice", "Bob"],      # -> StringType
+    "age": [25, 30],                # -> IntegerType
+    "score": [95.5, 87.3],          # -> DoubleType
+    "active": [True, False]         # -> BooleanType
+})
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use logical types for semantic meaning" icon="brain">
+    Logical types preserve semantic information for LLM operations:
+    
+    ```python
+    # Good: Preserves type information
+    StructField("document", MarkdownType)
+    StructField("embeddings", EmbeddingType(1536, "text-embedding-3-small"))
+    
+    # Avoid: Loses semantic meaning
+    StructField("document", StringType)
+    ```
+  </Accordion>
+  
+  <Accordion title="Be explicit about numeric precision" icon="calculator">
+    Choose appropriate numeric types based on precision needs:
+    
+    ```python
+    # For precise calculations
+    StructField("price", DoubleType)  # 64-bit precision
+    
+    # For memory efficiency
+    StructField("count", IntegerType)
+    StructField("ratio", FloatType)  # 32-bit sufficient
+    ```
+  </Accordion>
+  
+  <Accordion title="Define schemas for complex data" icon="diagram-project">
+    Explicit schemas prevent inference errors:
+    
+    ```python
+    # Good: Explicit schema
+    schema = Schema([
+        ColumnField("id", IntegerType),
+        ColumnField("metadata", StructType([
+            StructField("tags", ArrayType(StringType))
+        ]))
+    ])
+    df = session.read.json("data.json", schema=schema)
+    ```
+  </Accordion>
+  
+  <Accordion title="Use appropriate types for embeddings" icon="vector-square">
+    Match embedding dimensions to your model:
+    
+    ```python
+    # text-embedding-3-small: 1536 dimensions
+    EmbeddingType(1536, "text-embedding-3-small")
+    
+    # text-embedding-3-large: 3072 dimensions
+    EmbeddingType(3072, "text-embedding-3-large")
+    
+    # Cohere embed-v4: 1024 dimensions
+    EmbeddingType(1024, "embed-v4.0")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Type Compatibility
+
+### Numeric Type Hierarchy
+
+```
+IntegerType
+    ↓ (can cast to)
+FloatType
+    ↓ (can cast to)
+DoubleType
+```
+
+### String to Other Types
+
+```python
+# String can be cast to most types
+StringType → IntegerType    # "123" → 123
+StringType → DoubleType     # "123.45" → 123.45
+StringType → BooleanType    # "true" → True
+StringType → DateType       # "2024-01-01" → Date(2024, 1, 1)
+```
+
+### Logical Types
+
+Logical types are specialized strings - they can be used anywhere strings are accepted, but preserve additional semantic meaning:
+
+```python
+# These are all string-based
+MarkdownType   # String with markdown formatting
+JsonType       # String with JSON content
+HtmlType       # String with HTML content
+TranscriptType # String with transcript content
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="DataFrames" icon="table" href="/concepts/dataframes">
+    Work with typed data in DataFrames
+  </Card>
+  
+  <Card title="Semantic Operators" icon="wand-magic-sparkles" href="/concepts/semantic-operators">
+    Use logical types with LLM operations
+  </Card>
+</CardGroup>

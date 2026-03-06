@@ -1,0 +1,231 @@
+---
+title: Markdown Functions
+description: Functions for parsing and processing Markdown documents
+---
+
+Markdown functions provide tools for parsing, chunking, and extracting content from Markdown documents. All functions are available via `fc.markdown.*`.
+
+## to_json
+
+Converts a column of Markdown-formatted strings into a hierarchical JSON representation.
+
+```python
+fc.markdown.to_json(column: ColumnOrName) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column containing Markdown strings.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of JSON-formatted strings representing the structured document tree.
+</ResponseField>
+
+<Note>
+This function parses Markdown into a structured JSON format optimized for document chunking, semantic analysis, and `jq` queries. The output conforms to a custom schema that organizes content into nested sections based on heading levels. The full JSON schema is available at: docs.fenic.ai/topics/markdown-json
+</Note>
+
+### Supported Markdown Features
+
+- Headings with nested hierarchy (e.g., h2 → h3 → h4)
+- Paragraphs with inline formatting (bold, italics, links, code, etc.)
+- Lists (ordered, unordered, task lists)
+- Tables with header alignment and inline content
+- Code blocks with language info
+- Blockquotes, horizontal rules, and inline/flow HTML
+
+### Examples
+
+<CodeGroup>
+```python Convert markdown to JSON
+df.select(fc.markdown.to_json(fc.col("markdown_text")))
+```
+
+```python Extract all level-2 headings with jq
+df.select(
+    fc.json.jq(
+        fc.markdown.to_json(fc.col("md")),
+        ".. | select(.type == 'heading' and .level == 2)"
+    )
+)
+```
+</CodeGroup>
+
+---
+
+## get_code_blocks
+
+Extracts all code blocks from a column of Markdown-formatted strings.
+
+```python
+fc.markdown.get_code_blocks(
+    column: ColumnOrName,
+    language_filter: Optional[str] = None
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column containing Markdown strings.
+</ParamField>
+
+<ParamField path="language_filter" type="Optional[str]">
+  Optional language filter to extract only code blocks with a specific language. By default, all code blocks are extracted.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of code blocks. The output column type is `ArrayType(StructType([StructField("language", StringType), StructField("code", StringType)]))`.
+</ResponseField>
+
+<Note>
+- Code blocks are parsed from fenced Markdown blocks (e.g., triple backticks).
+- Language identifiers are optional and may be null if not provided in the original Markdown.
+- Indented code blocks without fences are not currently supported.
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Extract all code blocks
+df.select(fc.markdown.get_code_blocks(fc.col("markdown_text")))
+```
+
+```python Explode code blocks into individual rows
+df = df.with_column("blocks", fc.markdown.get_code_blocks(fc.col("md")))
+df = df.explode("blocks")
+df = df.select(fc.col("blocks")["language"], fc.col("blocks")["code"])
+```
+</CodeGroup>
+
+---
+
+## generate_toc
+
+Generates a table of contents from markdown headings.
+
+```python
+fc.markdown.generate_toc(
+    column: ColumnOrName,
+    max_level: Optional[int] = None
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column containing Markdown strings.
+</ParamField>
+
+<ParamField path="max_level" type="Optional[int]">
+  Maximum heading level to include in the TOC (1-6). Defaults to 6 (all levels).
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of Markdown-formatted table of contents strings.
+</ResponseField>
+
+<Note>
+- The TOC is generated using markdown heading syntax (# ## ### etc.)
+- Each heading in the source document becomes a line in the TOC
+- The heading level is preserved in the output
+- This creates a valid markdown document that can be rendered or processed further
+</Note>
+
+### Examples
+
+<CodeGroup>
+```python Generate a complete TOC
+df.select(fc.markdown.generate_toc(fc.col("documentation")))
+```
+
+```python Generate a simplified TOC with only top 2 levels
+df.select(fc.markdown.generate_toc(fc.col("documentation"), max_level=2))
+```
+
+```python Add TOC as a new column
+df = df.with_column("toc", fc.markdown.generate_toc(fc.col("content"), max_level=3))
+```
+</CodeGroup>
+
+---
+
+## extract_header_chunks
+
+Splits markdown documents into logical chunks based on heading hierarchy.
+
+```python
+fc.markdown.extract_header_chunks(
+    column: ColumnOrName,
+    header_level: int
+) -> Column
+```
+
+<ParamField path="column" type="ColumnOrName" required>
+  Input column containing Markdown strings.
+</ParamField>
+
+<ParamField path="header_level" type="int" required>
+  Heading level to split on (1-6). Creates a new chunk at every heading of this level, including all nested content and subsections.
+</ParamField>
+
+<ResponseField name="return" type="Column">
+  A column of arrays containing chunk objects with the following structure:
+  ```python
+  ArrayType(StructType([
+      StructField("heading", StringType),        # Heading text (clean, no markdown)
+      StructField("level", IntegerType),         # Heading level (1-6)
+      StructField("content", StringType),        # All content under this heading (clean text)
+      StructField("parent_heading", StringType), # Parent heading text (or null)
+      StructField("full_path", StringType),      # Full breadcrumb path
+  ]))
+  ```
+</ResponseField>
+
+### Features
+
+- **Context-preserving**: Each chunk contains all content and subsections under the heading
+- **Hierarchical awareness**: Includes parent heading context for better LLM understanding
+- **Clean text output**: Strips markdown formatting for direct LLM consumption
+
+### Chunking Behavior
+
+With `header_level=2`, this markdown:
+
+```markdown
+# Introduction
+Overview text
+
+## Getting Started
+Setup instructions
+
+### Prerequisites
+Python 3.8+ required
+
+## API Reference
+Function documentation
+```
+
+Produces 2 chunks:
+1. `Getting Started` chunk (includes `Prerequisites` subsection)
+2. `API Reference` chunk
+
+### Examples
+
+<CodeGroup>
+```python Split articles into top-level sections
+df.select(fc.markdown.extract_header_chunks(fc.col("articles"), header_level=1))
+```
+
+```python Split documentation into feature sections
+df.select(fc.markdown.extract_header_chunks(fc.col("docs"), header_level=2))
+```
+
+```python Explode chunks into individual rows for processing
+chunks_df = df.select(
+    fc.markdown.extract_header_chunks(fc.col("markdown"), header_level=2).alias("chunks")
+).explode("chunks")
+
+chunks_df.select(
+    fc.col("chunks").heading,
+    fc.col("chunks").content,
+    fc.col("chunks").full_path
+)
+```
+</CodeGroup>
