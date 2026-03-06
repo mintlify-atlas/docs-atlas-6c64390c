@@ -1,0 +1,165 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Fenic",
+  "projectDescription": "PySpark-inspired DataFrame library for AI applications with semantic operators and LLM-powered data transformations",
+  "theme": "aspen",
+  "primaryColor": "#c8c7c9",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/sessions",
+              "concepts/dataframes",
+              "concepts/semantic-operators",
+              "concepts/data-types"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/working-with-semantic-operators",
+              "guides/text-processing",
+              "guides/memory-and-retrieval",
+              "guides/batch-inference",
+              "guides/error-handling"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/hello-world",
+              "examples/enrichment",
+              "examples/meeting-transcript-processing",
+              "examples/news-analysis",
+              "examples/podcast-summarization",
+              "examples/semantic-joins",
+              "examples/named-entity-recognition",
+              "examples/markdown-processing",
+              "examples/json-processing",
+              "examples/feedback-clustering",
+              "examples/document-extraction"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/llm-providers",
+              "integrations/mcp-server",
+              "integrations/agent-frameworks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/session",
+              "api/dataframe",
+              "api/column",
+              "api/grouped-data"
+            ]
+          },
+          {
+            "group": "Functions",
+            "pages": [
+              "api/functions/semantic",
+              "api/functions/text",
+              "api/functions/json",
+              "api/functions/markdown",
+              "api/functions/embedding",
+              "api/functions/array",
+              "api/functions/datetime",
+              "api/functions/builtin"
+            ]
+          },
+          {
+            "group": "I/O",
+            "pages": [
+              "api/dataframe-reader",
+              "api/dataframe-writer",
+              "api/catalog"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/data-types",
+              "api/types/schema",
+              "api/types/semantic-types"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/session-config",
+              "api/semantic-config",
+              "api/model-config"
+            ]
+          },
+          {
+            "group": "MCP",
+            "pages": [
+              "api/mcp/server",
+              "api/mcp/tools"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Semantic operators for LLM-powered data transformations (extract, classify, map, join, reduce)",
+    "PySpark-inspired DataFrame API with lazy evaluation and query optimization",
+    "Native support for unstructured data types (markdown, transcripts, JSON)",
+    "Multi-provider LLM support (OpenAI, Anthropic, Google, Cohere, OpenRouter)",
+    "Automatic batch optimization and rate limiting for API calls",
+    "Built-in token counting and cost tracking",
+    "MCP server integration for AI assistants",
+    "Production-ready with retry logic and error handling"
+  ],
+  "publicApiSurface": [
+    "Session",
+    "DataFrame",
+    "Column",
+    "semantic.extract()",
+    "semantic.map()",
+    "semantic.classify()",
+    "semantic.join()",
+    "semantic.group_by()",
+    "semantic.reduce()",
+    "semantic.predicate()",
+    "semantic.embed()",
+    "semantic.parse_pdf()",
+    "semantic.analyze_sentiment()",
+    "text.chunk()",
+    "text.recursive_word_chunk()",
+    "markdown.parse()",
+    "json.jq()",
+    "OpenAILanguageModel",
+    "AnthropicLanguageModel",
+    "GoogleDeveloperLanguageModel",
+    "OpenAIEmbeddingModel",
+    "SessionConfig",
+    "SemanticConfig",
+    "create_mcp_server()",
+    "udf()",
+    "async_udf()"
+  ]
+}
