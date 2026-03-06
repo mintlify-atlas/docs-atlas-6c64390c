@@ -389,6 +389,145 @@ configure_logging()
 # - Query details (parameters, filters)
 ```
 
+## Standalone Server Functions
+
+Fenic provides convenience functions for running MCP servers without manually managing the server instance.
+
+### create_mcp_server()
+
+Create an MCP server from a session and tools.
+
+```python
+from fenic import create_mcp_server
+
+server = create_mcp_server(
+    session=session,
+    server_name="My Fenic Server",
+    user_defined_tools=[],
+    system_tools=SystemToolConfig(
+        table_names=["my_table"],
+        tool_namespace="data"
+    ),
+    concurrency_limit=8
+)
+```
+
+<ParamField path="session" type="Session" required>
+  Fenic session used to execute tools
+</ParamField>
+
+<ParamField path="server_name" type="str" required>
+  Name of the MCP server
+</ParamField>
+
+<ParamField path="user_defined_tools" type="list[UserDefinedTool]" optional>
+  User-created tools
+</ParamField>
+
+<ParamField path="system_tools" type="SystemToolConfig" optional>
+  Configuration for auto-generated system tools
+</ParamField>
+
+<ParamField path="concurrency_limit" type="int" default="8">
+  Maximum concurrent tool executions
+</ParamField>
+
+### run_mcp_server_sync()
+
+Run an MCP server synchronously (creates new event loop).
+
+```python
+from fenic import create_mcp_server, run_mcp_server_sync
+
+server = create_mcp_server(session, "My Server")
+run_mcp_server_sync(
+    server,
+    transport="http",
+    port=8000,
+    host="0.0.0.0"
+)
+```
+
+<ParamField path="server" type="FenicMCPServer" required>
+  MCP server to run
+</ParamField>
+
+<ParamField path="transport" type="str" default="http">
+  Transport protocol (`"http"` or `"stdio"`)
+</ParamField>
+
+<ParamField path="stateless_http" type="bool" default="true">
+  Use stateless HTTP transport
+</ParamField>
+
+<ParamField path="port" type="int" optional>
+  Port to listen on (HTTP transport only)
+</ParamField>
+
+<ParamField path="host" type="str" optional>
+  Host to listen on (HTTP transport only)
+</ParamField>
+
+<ParamField path="path" type="str" default="/mcp">
+  Path to listen on (HTTP transport only)
+</ParamField>
+
+### run_mcp_server_async()
+
+Run an MCP server asynchronously (use existing event loop).
+
+```python
+from fenic import create_mcp_server, run_mcp_server_async
+
+server = create_mcp_server(session, "My Server")
+await run_mcp_server_async(
+    server,
+    transport="http",
+    port=8000
+)
+```
+
+Parameters are the same as `run_mcp_server_sync()`.
+
+### run_mcp_server_asgi()
+
+Create a Starlette ASGI app for the MCP server.
+
+```python
+from fenic import create_mcp_server, run_mcp_server_asgi
+import uvicorn
+
+server = create_mcp_server(session, "My Server")
+app = run_mcp_server_asgi(
+    server,
+    transport="streamable-http",
+    path="/mcp"
+)
+
+# Run with uvicorn
+uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+<ParamField path="server" type="FenicMCPServer" required>
+  MCP server to run
+</ParamField>
+
+<ParamField path="stateless_http" type="bool" default="true">
+  Use stateless HTTP transport
+</ParamField>
+
+<ParamField path="transport" type="str" default="streamable-http">
+  Transport protocol (`"streamable-http"` or `"sse"`)
+</ParamField>
+
+<ParamField path="path" type="str" default="/mcp">
+  Path to mount the MCP endpoint
+</ParamField>
+
+<ParamField path="middleware" type="list" optional>
+  List of Starlette ASGI middleware to apply
+</ParamField>
+
 ## Related
 
 - [MCP Tools](/api/mcp/tools) - Tool creation and configuration
